@@ -34,13 +34,13 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       title,
       description,
-      images: [{ url: "/og.png", width: 1200, height: 630, alt: "台指期籌碼－日盤未平倉買賣超" }],
+      images: [{ url: "/og-dark.png", width: 1200, height: 630, alt: "台指期籌碼－日盤未平倉買賣超" }],
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
-      images: ["/og.png"],
+      images: ["/og-dark.png"],
     },
   };
 }

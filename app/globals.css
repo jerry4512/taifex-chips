@@ -1,18 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #13213a;
-  --muted: #657087;
-  --line: #dce2ea;
-  --paper: #ffffff;
-  --canvas: #f4f6f8;
-  --navy: #12243d;
-  --orange: #e96b17;
-  --orange-soft: #fff3e7;
-  --red: #d94242;
-  --red-soft: #fff0f0;
-  --green: #29855c;
-  --green-soft: #eaf7f0;
+  color-scheme: dark;
+  --ink: #edf3fb;
+  --muted: #96a3b8;
+  --line: #29364a;
+  --paper: #121b2a;
+  --canvas: #080d15;
+  --navy: #0c1421;
+  --orange: #ff7a1a;
+  --orange-soft: rgba(255, 122, 26, 0.14);
+  --red: #ff6f73;
+  --red-soft: rgba(255, 89, 95, 0.14);
+  --green: #48d49a;
+  --green-soft: rgba(72, 212, 154, 0.13);
 }
 
 * {
@@ -25,7 +26,9 @@ html {
 
 body {
   margin: 0;
-  background: var(--canvas);
+  background:
+    radial-gradient(circle at 18% -8%, rgba(34, 62, 101, 0.28), transparent 35%),
+    var(--canvas);
   color: var(--ink);
   font-family: var(--font-noto-sans-tc), Arial, sans-serif;
 }
@@ -44,6 +47,7 @@ a:focus-visible {
 .site-header {
   align-items: center;
   background: var(--navy);
+  border-bottom: 1px solid var(--line);
   color: white;
   display: flex;
   justify-content: space-between;
@@ -84,7 +88,7 @@ a:focus-visible {
 }
 
 .brand small {
-  color: #9eacc0;
+  color: #8796ac;
   font-family: var(--font-space-grotesk), sans-serif;
   font-size: 9px;
   letter-spacing: 0.12em;
@@ -93,7 +97,7 @@ a:focus-visible {
 
 .header-meta {
   align-items: center;
-  color: #c9d2df;
+  color: #b4c0d0;
   display: flex;
   font-size: 13px;
   gap: 8px;
@@ -184,7 +188,7 @@ h1 {
 }
 
 .range-panel small {
-  color: #8993a4;
+  color: #78879e;
   font-size: 12px;
   margin-top: 4px;
 }
@@ -202,6 +206,7 @@ h1 {
   border-top: 3px solid #aeb7c4;
   min-height: 144px;
   padding: 22px 24px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
 }
 
 .metric-card p {
@@ -220,7 +225,7 @@ h1 {
 }
 
 .metric-card span {
-  color: #8a94a4;
+  color: #78879e;
   display: block;
   font-size: 12px;
   margin-top: 10px;
@@ -245,7 +250,7 @@ h1 {
 .report-card {
   background: var(--paper);
   border: 1px solid var(--line);
-  box-shadow: 0 12px 40px rgba(22, 35, 55, 0.06);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.26);
 }
 
 .report-heading {
@@ -266,8 +271,8 @@ h2 {
 }
 
 button {
-  background: white;
-  border: 1px solid #cbd3df;
+  background: #192436;
+  border: 1px solid #39485e;
   border-radius: 7px;
   color: var(--ink);
   cursor: pointer;
@@ -279,6 +284,7 @@ button {
 }
 
 button:hover:not(:disabled) {
+  background: var(--orange-soft);
   border-color: var(--orange);
   color: var(--orange);
 }
@@ -302,7 +308,7 @@ table {
 }
 
 thead {
-  background: var(--orange);
+  background: #a84408;
   color: white;
 }
 
@@ -323,16 +329,16 @@ thead th {
 
 tbody th,
 tbody td {
-  border-bottom: 1px solid #e5e9ef;
-  border-right-color: #edf0f4;
+  border-bottom: 1px solid #253247;
+  border-right-color: #202c3e;
   font-family: var(--font-space-grotesk), var(--font-noto-sans-tc), sans-serif;
   font-size: 14px;
   font-weight: 600;
 }
 
 tbody th {
-  background: #f7f8fa;
-  color: #25334a;
+  background: #0e1725;
+  color: #cbd5e3;
   text-align: center;
 }
 
@@ -343,7 +349,7 @@ tbody tr:last-child td {
 
 tbody tr:hover th,
 tbody tr:hover td {
-  background: #fffaf6;
+  background: #1a2535;
 }
 
 .value-positive {
@@ -355,7 +361,7 @@ tbody tr:hover td {
 }
 
 .value-neutral {
-  color: #5d687a;
+  color: #8f9caf;
 }
 
 td:last-child {
@@ -384,16 +390,17 @@ td:last-child {
 }
 
 .signal-neutral {
-  background: #eef1f5;
-  color: #667085;
+  background: #222e40;
+  color: #aab6c7;
 }
 
 .empty-value {
-  color: #abb2bd;
+  color: #657388;
 }
 
 .method-notes {
-  background: #fafbfc;
+  background: #0d1623;
+  border-top: 1px solid #202c3e;
   display: grid;
   gap: 8px 28px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -429,19 +436,19 @@ td:last-child {
 
 .loading-line {
   animation: pulse 1.2s ease-in-out infinite;
-  background: linear-gradient(90deg, #d7dde6 0%, #f0f2f5 50%, #d7dde6 100%);
+  background: linear-gradient(90deg, #263348 0%, #40506a 50%, #263348 100%);
   border-radius: 99px;
   height: 8px;
   width: 160px;
 }
 
 .error-message strong {
-  color: #b42318;
+  color: var(--red);
 }
 
 footer {
   align-items: center;
-  color: #788396;
+  color: #738197;
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -451,12 +458,12 @@ footer {
 }
 
 footer a {
-  color: #52647d;
+  color: #a9b7ca;
   font-weight: 700;
 }
 
 footer span:last-child::before {
-  color: #bbc2cc;
+  color: #526075;
   content: "·";
   margin-right: 14px;
 }
