@@ -38,3 +38,20 @@ test("starter preview is removed", async () => {
   assert.doesNotMatch(layout, /Starter Project|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
+
+test("offers a date-specific database acquisition flow", async () => {
+  const [page, route, hosting] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/api/trading-doctor/taifex-futures/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /type="date"/);
+  assert.match(page, /取得資料/);
+  assert.doesNotMatch(page, /重新整理/);
+  assert.match(route, /export async function POST/);
+  assert.equal(JSON.parse(hosting).d1, "DB");
+});

@@ -260,6 +260,48 @@ h1 {
   padding: 26px 28px 22px;
 }
 
+.acquire-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  justify-content: flex-end;
+}
+
+.acquire-controls label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.acquire-controls input {
+  background: #0d1623;
+  border: 1px solid #39485e;
+  border-radius: 7px;
+  color: var(--ink);
+  font-family: var(--font-space-grotesk), var(--font-noto-sans-tc), sans-serif;
+  font-size: 13px;
+  min-height: 38px;
+  padding: 7px 10px;
+}
+
+.acquire-controls input:focus-visible {
+  border-color: var(--orange);
+  outline: 3px solid rgba(255, 122, 26, 0.2);
+  outline-offset: 2px;
+}
+
+.save-notice {
+  background: var(--green-soft);
+  border-top: 1px solid rgba(72, 212, 154, 0.22);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+  padding: 10px 28px;
+  text-align: right;
+}
+
 .section-kicker {
   margin-bottom: 6px;
 }
@@ -511,6 +553,10 @@ footer span:last-child::before {
     padding: 22px 20px 18px;
   }
 
+  .acquire-controls {
+    justify-content: flex-start;
+  }
+
   .method-notes {
     grid-template-columns: 1fr;
     padding: 18px 20px 20px;
@@ -551,6 +597,15 @@ footer span:last-child::before {
 
   .report-heading {
     flex-direction: column;
+  }
+
+  .acquire-controls {
+    width: 100%;
+  }
+
+  .acquire-controls input {
+    flex: 1;
+    min-width: 150px;
   }
 }
 

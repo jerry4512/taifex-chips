@@ -16,6 +16,12 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-TW", {
   minute: "2-digit",
   hour12: false,
 });
+const taipeiToday = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Taipei",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
 
 function formatNumber(value: number | null): string {
   return value === null ? "" : numberFormatter.format(value);
@@ -105,6 +111,9 @@ export default function Home() {
   const [report, setReport] = useState<TaifexFuturesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(taipeiToday);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -122,6 +131,30 @@ export default function Home() {
       setLoading(false);
     }
   }, []);
+
+  const acquireSelectedDate = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch("/api/trading-doctor/taifex-futures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: selectedDate }),
+      });
+      const payload = (await response.json()) as TaifexFuturesResponse & {
+        error?: string;
+        savedDate?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "無法取得期交所資料");
+      setReport(payload);
+      setNotice(`${formatDate(payload.savedDate ?? selectedDate)} 資料已儲存`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "無法取得期交所資料");
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedDate]);
 
   useEffect(() => {
     void loadReport();
@@ -208,10 +241,24 @@ export default function Home() {
             <p className="section-kicker">每日明細</p>
             <h2 id="report-title">下午：日盤未平倉買賣超</h2>
           </div>
-          <button type="button" onClick={() => void loadReport()} disabled={loading}>
-            {loading ? "更新中…" : "重新整理"}
-          </button>
+          <div className="acquire-controls">
+            <label htmlFor="acquire-date">指定日期</label>
+            <input
+              id="acquire-date"
+              type="date"
+              min="2026-09-21"
+              max={taipeiToday}
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              disabled={saving}
+            />
+            <button type="button" onClick={() => void acquireSelectedDate()} disabled={saving}>
+              {saving ? "取得中…" : "取得資料"}
+            </button>
+          </div>
         </div>
+
+        {notice ? <p className="save-notice" role="status">{notice}</p> : null}
 
         {error ? (
           <div className="state-message error-message" role="alert">
@@ -226,7 +273,7 @@ export default function Home() {
             <span className="loading-line" />
             <span>正在整理期交所資料…</span>
           </div>
-        ) : (
+        ) : report && report.data.length > 0 ? (
           <div className="table-scroll">
             <table>
               <thead>
@@ -247,6 +294,11 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+          </div>
+        ) : (
+          <div className="state-message" role="status">
+            <strong>資料庫目前沒有資料</strong>
+            <span>請選擇日期後按「取得資料」。</span>
           </div>
         )}
 
