@@ -1,6 +1,11 @@
-import type { TaifexFuturesRow } from "./taifex";
+import type {
+  ForeignNetPositions,
+  TaifexAfterHoursRow,
+  TaifexFuturesRow,
+} from "./taifex";
 import {
   equivalentTxContracts,
+  estimateOpenEquivalentNetOi,
   interpretChipChange,
 } from "./taifex";
 
@@ -10,6 +15,13 @@ interface StoredFuturesPosition {
   mtx_net_open_interest: number;
   tmf_net_open_interest: number;
   night_equivalent_net: number;
+}
+
+interface StoredNightlyPosition {
+  date: string;
+  tx_night_net: number;
+  mtx_night_net: number;
+  tmf_night_net: number;
 }
 
 const initialRows: Array<StoredFuturesPosition & { collected_at: string }> = [
@@ -47,7 +59,48 @@ const initialRows: Array<StoredFuturesPosition & { collected_at: string }> = [
   },
 ];
 
-async function initializeDatabase(): Promise<D1Database> {
+const nightlyInitialRows: Array<StoredNightlyPosition & { collected_at: string }> = [
+  {
+    date: "2026-09-21",
+    tx_night_net: -1196,
+    mtx_night_net: -2746,
+    tmf_night_net: -6177,
+    collected_at: "2026-09-21T00:30:00.000Z",
+  },
+  {
+    date: "2026-09-22",
+    tx_night_net: 255,
+    mtx_night_net: 5,
+    tmf_night_net: -547,
+    collected_at: "2026-09-22T00:30:00.000Z",
+  },
+  {
+    date: "2026-09-23",
+    tx_night_net: 203,
+    mtx_night_net: -1324,
+    tmf_night_net: 1497,
+    collected_at: "2026-09-23T00:30:00.000Z",
+  },
+  {
+    date: "2026-09-24",
+    tx_night_net: -910,
+    mtx_night_net: -3274,
+    tmf_night_net: -10301,
+    collected_at: "2026-09-24T00:30:00.000Z",
+  },
+];
+
+let databaseReady: Promise<D1Database> | null = null;
+
+function initializeDatabase(): Promise<D1Database> {
+  databaseReady ??= createSchema().catch((error: unknown) => {
+    databaseReady = null;
+    throw error;
+  });
+  return databaseReady;
+}
+
+async function createSchema(): Promise<D1Database> {
   const { env } = await import("cloudflare:workers");
   const database = env.DB;
   await database
@@ -84,6 +137,43 @@ async function initializeDatabase(): Promise<D1Database> {
           row.mtx_net_open_interest,
           row.tmf_net_open_interest,
           row.night_equivalent_net,
+          row.collected_at,
+          row.collected_at,
+        ),
+    ),
+  );
+
+  await database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS nightly_futures_positions (
+        date text PRIMARY KEY NOT NULL,
+        tx_night_net integer NOT NULL,
+        mtx_night_net integer NOT NULL,
+        tmf_night_net integer NOT NULL,
+        collected_at text NOT NULL,
+        updated_at text NOT NULL
+      )`,
+    )
+    .run();
+
+  await database.batch(
+    nightlyInitialRows.map((row) =>
+      database
+        .prepare(
+          `INSERT OR IGNORE INTO nightly_futures_positions (
+            date,
+            tx_night_net,
+            mtx_night_net,
+            tmf_night_net,
+            collected_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          row.date,
+          row.tx_night_net,
+          row.mtx_night_net,
+          row.tmf_night_net,
           row.collected_at,
           row.collected_at,
         ),
@@ -167,6 +257,93 @@ export async function listFuturesPositions(): Promise<TaifexFuturesRow[]> {
       nightEquivalentNet: stored.night_equivalent_net,
       pureDayChange,
       interpretation: pureDayChange === null ? null : interpretChipChange(pureDayChange),
+    };
+  });
+}
+
+export async function saveNightlyPosition(
+  date: string,
+  positions: ForeignNetPositions,
+): Promise<void> {
+  const database = await initializeDatabase();
+  const now = new Date().toISOString();
+
+  await database
+    .prepare(
+      `INSERT INTO nightly_futures_positions (
+        date,
+        tx_night_net,
+        mtx_night_net,
+        tmf_night_net,
+        collected_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(date) DO UPDATE SET
+        tx_night_net = excluded.tx_night_net,
+        mtx_night_net = excluded.mtx_night_net,
+        tmf_night_net = excluded.tmf_night_net,
+        updated_at = excluded.updated_at`,
+    )
+    .bind(
+      date,
+      positions.臺股期貨,
+      positions.小型臺指期貨,
+      positions.微型臺指期貨,
+      now,
+      now,
+    )
+    .run();
+}
+
+/** 取交易日 date 之前最後一個已公布的官方約當淨 OI，作為開盤推估基準。 */
+function baselineOfficialOi(
+  dailyRows: readonly TaifexFuturesRow[],
+  date: string,
+): number | null {
+  let baseline: number | null = null;
+  for (const row of dailyRows) {
+    if (row.date >= date) break;
+    baseline = row.officialEquivalentNetOi;
+  }
+  return baseline;
+}
+
+export async function listNightlyPositions(): Promise<TaifexAfterHoursRow[]> {
+  const database = await initializeDatabase();
+  const [dailyRows, stored] = await Promise.all([
+    listFuturesPositions(),
+    database
+      .prepare(
+        `SELECT
+          date,
+          tx_night_net,
+          mtx_night_net,
+          tmf_night_net
+        FROM nightly_futures_positions
+        ORDER BY date ASC`,
+      )
+      .all<StoredNightlyPosition>(),
+  ]);
+
+  return stored.results.map((row) => {
+    const nightEquivalentNet = equivalentTxContracts({
+      臺股期貨: row.tx_night_net,
+      小型臺指期貨: row.mtx_night_net,
+      微型臺指期貨: row.tmf_night_net,
+    });
+    const previousOfficialEquivalentNetOi = baselineOfficialOi(dailyRows, row.date);
+
+    return {
+      date: row.date,
+      txNightNet: row.tx_night_net,
+      mtxNightNet: row.mtx_night_net,
+      tmfNightNet: row.tmf_night_net,
+      nightEquivalentNet,
+      previousOfficialEquivalentNetOi,
+      estimatedOpenEquivalentNetOi: estimateOpenEquivalentNetOi(
+        previousOfficialEquivalentNetOi,
+        nightEquivalentNet,
+      ),
     };
   });
 }

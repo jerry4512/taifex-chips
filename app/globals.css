@@ -113,17 +113,112 @@ a:focus-visible {
 
 main {
   min-height: 100vh;
+  padding-bottom: 38px;
 }
 
 .hero,
 .metrics,
 .spot-section,
 .report-card,
-footer {
+.telegram-bar {
   margin-left: auto;
   margin-right: auto;
   max-width: 1480px;
   width: calc(100% - clamp(32px, 8vw, 120px));
+}
+
+.telegram-bar {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 3px solid #2aa7e0;
+  display: grid;
+  gap: 14px 24px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 22px;
+  padding: 18px 22px;
+}
+
+.telegram-intro h2 {
+  font-size: 18px;
+}
+
+.telegram-intro .section-kicker {
+  color: #2aa7e0;
+}
+
+.telegram-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.telegram-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  justify-content: flex-end;
+}
+
+.telegram-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.telegram-chip {
+  align-items: baseline;
+  background: #0d1623;
+  border: 1px solid #39485e;
+  border-radius: 999px;
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 5px 11px;
+}
+
+.telegram-chip span {
+  color: #738197;
+  font-family: var(--font-space-grotesk), var(--font-noto-sans-tc), sans-serif;
+}
+
+.telegram-send:hover:not(:disabled) {
+  background: rgba(42, 167, 224, 0.14);
+  border-color: #2aa7e0;
+  color: #6ac6f0;
+}
+
+.telegram-feedback {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 4px;
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.telegram-feedback li {
+  display: flex;
+  gap: 8px;
+}
+
+.telegram-sent strong::before {
+  color: var(--green);
+  content: "✓ ";
+}
+
+.telegram-failed {
+  color: var(--red);
+}
+
+.telegram-failed strong::before {
+  content: "✕ ";
 }
 
 .spot-section {
@@ -262,7 +357,8 @@ p {
   margin-top: 0;
 }
 
-h1 {
+h1,
+.hero-title {
   font-size: clamp(34px, 4vw, 56px);
   letter-spacing: -0.04em;
   line-height: 1.05;
@@ -602,28 +698,6 @@ td:last-child {
   color: var(--red);
 }
 
-footer {
-  align-items: center;
-  color: #738197;
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 8px 14px;
-  justify-content: center;
-  padding: 26px 0 38px;
-}
-
-footer a {
-  color: #a9b7ca;
-  font-weight: 700;
-}
-
-footer span:last-child::before {
-  color: #526075;
-  content: "·";
-  margin-right: 14px;
-}
-
 @keyframes pulse {
   0%,
   100% {
@@ -706,8 +780,16 @@ footer span:last-child::before {
   .metrics,
   .spot-section,
   .report-card,
-  footer {
+  .telegram-bar {
     width: calc(100% - 28px);
+  }
+
+  .telegram-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .telegram-actions {
+    justify-content: flex-start;
   }
 
   .hero {

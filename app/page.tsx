@@ -3,10 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ChipInterpretation,
+  TaifexAfterHoursResponse,
+  TaifexAfterHoursRow,
   TaifexFuturesResponse,
   TaifexFuturesRow,
 } from "../lib/taifex";
 import type { TwseBfi82uResponse, TwseInstitutionFlow } from "../lib/twse";
+import type {
+  TelegramStatusResponse,
+  TelegramTestResponse,
+} from "./api/trading-doctor/telegram-test/route";
 
 const numberFormatter = new Intl.NumberFormat("zh-TW");
 const hundredMillionFormatter = new Intl.NumberFormat("zh-TW", {
@@ -116,6 +122,40 @@ function DataRow({ row, isFirst }: { row: TaifexFuturesRow; isFirst: boolean }) 
   );
 }
 
+function AfterHoursDataRow({
+  row,
+  isFirst,
+}: {
+  row: TaifexAfterHoursRow;
+  isFirst: boolean;
+}) {
+  return (
+    <tr>
+      <th scope="row">{formatDate(row.date)}</th>
+      <td className={valueTone(row.txNightNet)}>{formatNumber(row.txNightNet)}</td>
+      <td className={valueTone(row.mtxNightNet)}>{formatNumber(row.mtxNightNet)}</td>
+      <td className={valueTone(row.tmfNightNet)}>{formatNumber(row.tmfNightNet)}</td>
+      <td className={valueTone(row.nightEquivalentNet)}>
+        {formatNumber(row.nightEquivalentNet)}
+      </td>
+      <td className={valueTone(row.previousOfficialEquivalentNetOi)}>
+        {row.previousOfficialEquivalentNetOi === null ? (
+          <EmptyCell firstRow={isFirst} />
+        ) : (
+          formatNumber(row.previousOfficialEquivalentNetOi)
+        )}
+      </td>
+      <td className={valueTone(row.estimatedOpenEquivalentNetOi)}>
+        {row.estimatedOpenEquivalentNetOi === null ? (
+          <EmptyCell firstRow={isFirst} />
+        ) : (
+          formatNumber(row.estimatedOpenEquivalentNetOi)
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function SpotFlowCard({ flow }: { flow: TwseInstitutionFlow }) {
   return (
     <article className={`spot-flow-card ${flow.name === "三大法人合計" ? "spot-total" : ""}`}>
@@ -148,6 +188,16 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState(taipeiToday);
   const [notice, setNotice] = useState<string | null>(null);
+  const [nightReport, setNightReport] = useState<TaifexAfterHoursResponse | null>(null);
+  const [nightError, setNightError] = useState<string | null>(null);
+  const [nightLoading, setNightLoading] = useState(true);
+  const [nightSaving, setNightSaving] = useState(false);
+  const [nightDate, setNightDate] = useState(taipeiToday);
+  const [nightNotice, setNightNotice] = useState<string | null>(null);
+  const [telegramStatus, setTelegramStatus] = useState<TelegramStatusResponse | null>(null);
+  const [telegramResult, setTelegramResult] = useState<TelegramTestResponse | null>(null);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+  const [telegramSending, setTelegramSending] = useState(false);
 
   const loadSpotReport = useCallback(async () => {
     setSpotLoading(true);
@@ -181,6 +231,81 @@ export default function Home() {
     }
   }, []);
 
+  const loadTelegramStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/trading-doctor/telegram-test", {
+        cache: "no-store",
+      });
+      setTelegramStatus((await response.json()) as TelegramStatusResponse);
+    } catch {
+      setTelegramStatus(null);
+    }
+  }, []);
+
+  const sendTelegramTest = useCallback(async () => {
+    setTelegramSending(true);
+    setTelegramError(null);
+    setTelegramResult(null);
+    try {
+      const response = await fetch("/api/trading-doctor/telegram-test", {
+        method: "POST",
+      });
+      const payload = (await response.json()) as TelegramTestResponse & {
+        error?: string;
+      };
+      if (payload.error) throw new Error(payload.error);
+      setTelegramResult(payload);
+    } catch (reason) {
+      setTelegramError(reason instanceof Error ? reason.message : "測試訊息傳送失敗");
+    } finally {
+      setTelegramSending(false);
+      void loadTelegramStatus();
+    }
+  }, [loadTelegramStatus]);
+
+  const loadNightReport = useCallback(async () => {
+    setNightLoading(true);
+    setNightError(null);
+    try {
+      const response = await fetch("/api/trading-doctor/taifex-futures-after-hours", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as TaifexAfterHoursResponse & {
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "無法取得期交所夜盤資料");
+      setNightReport(payload);
+    } catch (reason) {
+      setNightError(reason instanceof Error ? reason.message : "無法取得期交所夜盤資料");
+    } finally {
+      setNightLoading(false);
+    }
+  }, []);
+
+  const acquireNightDate = useCallback(async () => {
+    setNightSaving(true);
+    setNightError(null);
+    setNightNotice(null);
+    try {
+      const response = await fetch("/api/trading-doctor/taifex-futures-after-hours", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: nightDate }),
+      });
+      const payload = (await response.json()) as TaifexAfterHoursResponse & {
+        error?: string;
+        savedDate?: string;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "無法取得期交所夜盤資料");
+      setNightReport(payload);
+      setNightNotice(`${formatDate(payload.savedDate ?? nightDate)} 夜盤資料已儲存`);
+    } catch (reason) {
+      setNightError(reason instanceof Error ? reason.message : "無法取得期交所夜盤資料");
+    } finally {
+      setNightSaving(false);
+    }
+  }, [nightDate]);
+
   const acquireSelectedDate = useCallback(async () => {
     setSaving(true);
     setError(null);
@@ -207,10 +332,16 @@ export default function Home() {
 
   useEffect(() => {
     void loadSpotReport();
+    void loadNightReport();
     void loadReport();
-  }, [loadReport, loadSpotReport]);
+    void loadTelegramStatus();
+  }, [loadNightReport, loadReport, loadSpotReport, loadTelegramStatus]);
 
   const latest = report?.data.at(-1) ?? null;
+  const latestNight = nightReport?.data.at(-1) ?? null;
+  const nightRangeLabel = nightReport
+    ? `${formatDate(nightReport.startDate)} – ${formatDate(nightReport.endDate)}`
+    : "2026/09/21 – 今日";
   const rangeLabel = report
     ? `${formatDate(report.startDate)} – ${formatDate(report.endDate)}`
     : "2026/09/21 – 今日";
@@ -234,6 +365,59 @@ export default function Home() {
           <span>官方市場資料</span>
         </div>
       </header>
+
+      <section className="telegram-bar" aria-labelledby="telegram-title">
+        <div className="telegram-intro">
+          <p className="section-kicker">通知測試</p>
+          <h2 id="telegram-title">Telegram 籌碼推播</h2>
+          <p className="telegram-hint">
+            {telegramStatus === null
+              ? "正在讀取 .env 設定…"
+              : telegramStatus.configured
+                ? `已設定 ${telegramStatus.chats.length} 位收件人`
+                : (telegramStatus.error ?? "尚未設定，請填寫 .env")}
+          </p>
+        </div>
+
+        <div className="telegram-actions">
+          {telegramStatus?.configured ? (
+            <ul className="telegram-chips" aria-label="收件人">
+              {telegramStatus.chats.map((chat) => (
+                <li key={chat.chatId} className="telegram-chip">
+                  <strong>{chat.label}</strong>
+                  {chat.label === chat.chatId ? null : <span>{chat.chatId}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <button
+            type="button"
+            className="telegram-send"
+            onClick={() => void sendTelegramTest()}
+            disabled={telegramSending || telegramStatus?.configured !== true}
+          >
+            {telegramSending ? "傳送中…" : "傳送籌碼報告"}
+          </button>
+        </div>
+
+        {telegramError ? (
+          <p className="telegram-feedback telegram-failed" role="alert">
+            {telegramError}
+          </p>
+        ) : telegramResult ? (
+          <ul className="telegram-feedback" role="status">
+            {telegramResult.results.map((result) => (
+              <li
+                key={result.chatId}
+                className={result.ok ? "telegram-sent" : "telegram-failed"}
+              >
+                <strong>{result.label}</strong>
+                <span>{result.ok ? "已送出" : (result.error ?? "傳送失敗")}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
 
       <section className="spot-section" aria-labelledby="spot-title">
         <div className="spot-section-heading">
@@ -265,10 +449,140 @@ export default function Home() {
         )}
       </section>
 
+      <section className="hero" id="morning">
+        <div>
+          <p className="eyebrow">早上盤前推估</p>
+          <h1>夜盤推估開盤 OI</h1>
+          <p className="hero-copy">
+            期交所盤後交易時段（夜盤）歸屬於隔一交易日，因此開盤前即可取得。
+            將外資大台、小台與微台夜盤買賣超換算為約當大台，加回前一交易日官方約當淨 OI，推估今日開盤的外資部位。
+          </p>
+        </div>
+        <div className="range-panel" aria-label="夜盤資料區間">
+          <span>夜盤資料區間</span>
+          <strong>{nightRangeLabel}</strong>
+          <small>資料來源：期交所 futContractsDateAh</small>
+        </div>
+      </section>
+
+      <section className="metrics" aria-label="夜盤推估摘要">
+        <MetricCard
+          label="開盤預估約當淨 OI"
+          value={latestNight ? formatNumber(latestNight.estimatedOpenEquivalentNetOi) || "—" : "—"}
+          detail={latestNight ? `${formatDate(latestNight.date)} 盤前推估` : "尚未載入"}
+          tone={
+            latestNight?.estimatedOpenEquivalentNetOi == null
+              ? "neutral"
+              : latestNight.estimatedOpenEquivalentNetOi > 0
+                ? "positive"
+                : "negative"
+          }
+        />
+        <MetricCard
+          label="夜盤約當買賣超"
+          value={latestNight ? formatNumber(latestNight.nightEquivalentNet) : "—"}
+          detail="大台 + 小台 ÷ 4 + 微台 ÷ 20"
+          tone={
+            latestNight == null || latestNight.nightEquivalentNet === 0
+              ? "neutral"
+              : latestNight.nightEquivalentNet > 0
+                ? "positive"
+                : "negative"
+          }
+        />
+        <MetricCard
+          label="前日官方約當淨 OI"
+          value={
+            latestNight ? formatNumber(latestNight.previousOfficialEquivalentNetOi) || "—" : "—"
+          }
+          detail="推估基準（上一交易日收盤）"
+          tone="neutral"
+        />
+      </section>
+
+      <section className="report-card" aria-labelledby="night-report-title">
+        <div className="report-heading">
+          <div>
+            <p className="section-kicker">每日明細</p>
+            <h2 id="night-report-title">早上：夜盤推估 SOP</h2>
+          </div>
+          <div className="acquire-controls">
+            <label htmlFor="night-date">指定日期</label>
+            <input
+              id="night-date"
+              type="date"
+              min="2026-09-21"
+              max={taipeiToday}
+              value={nightDate}
+              onChange={(event) => setNightDate(event.target.value)}
+              disabled={nightSaving}
+            />
+            <button type="button" onClick={() => void acquireNightDate()} disabled={nightSaving}>
+              {nightSaving ? "取得中…" : "取得夜盤資料"}
+            </button>
+          </div>
+        </div>
+
+        {nightNotice ? <p className="save-notice" role="status">{nightNotice}</p> : null}
+
+        {nightError ? (
+          <div className="state-message error-message" role="alert">
+            <strong>夜盤資料暫時無法載入</strong>
+            <span>{nightError}</span>
+            <button type="button" onClick={() => void loadNightReport()}>
+              再試一次
+            </button>
+          </div>
+        ) : nightLoading && !nightReport ? (
+          <div className="state-message" role="status">
+            <span className="loading-line" />
+            <span>正在整理期交所夜盤資料…</span>
+          </div>
+        ) : nightReport && nightReport.data.length > 0 ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">日期</th>
+                  <th scope="col">大台夜盤買賣超</th>
+                  <th scope="col">小台夜盤買賣超</th>
+                  <th scope="col">微台夜盤買賣超</th>
+                  <th scope="col">夜盤約當買賣超</th>
+                  <th scope="col">前日官方約當淨 OI</th>
+                  <th scope="col">開盤預估約當淨 OI</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nightReport.data.map((row, index) => (
+                  <AfterHoursDataRow key={row.date} row={row} isFirst={index === 0} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="state-message" role="status">
+            <strong>資料庫目前沒有夜盤資料</strong>
+            <span>請選擇日期後按「取得夜盤資料」。</span>
+          </div>
+        )}
+
+        <div className="method-notes">
+          <p>
+            <strong>換算：</strong>夜盤約當買賣超 = 大台 + 小台 ÷ 4 + 微台 ÷ 20，各商品先四捨五入至整口。
+          </p>
+          <p>
+            <strong>推估：</strong>開盤預估約當淨 OI = 前一交易日官方約當淨 OI + 今日夜盤約當買賣超。
+          </p>
+          <p>
+            缺少前一交易日官方約當淨 OI 時，開盤預估保留空白。
+          </p>
+        </div>
+      </section>
+
       <section className="hero" id="top">
         <div>
           <p className="eyebrow">下午盤後追蹤</p>
-          <h1>日盤未平倉買賣超</h1>
+          <h2 className="hero-title">日盤未平倉買賣超</h2>
           <p className="hero-copy">
             將外資大台、小台與微台未平倉淨額換算為約當大台，拆出日盤籌碼的真實方向。
           </p>
@@ -394,17 +708,6 @@ export default function Home() {
           </p>
         </div>
       </section>
-
-      <footer>
-        <span>資料來源</span>
-        <a href="https://www.twse.com.tw/zh/trading/foreign/bfi82u.html" target="_blank" rel="noreferrer">
-          臺灣證券交易所・三大法人
-        </a>
-        <a href="https://www.taifex.com.tw/cht/3/futContractsDate" target="_blank" rel="noreferrer">
-          臺灣期貨交易所・區分各期貨契約
-        </a>
-        <span>僅供市場觀察，不構成投資建議</span>
-      </footer>
     </main>
   );
 }

@@ -8,6 +8,13 @@
       "when": 1790245843037,
       "tag": "0000_fearless_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790253000000,
+      "tag": "0001_nightly_futures_positions",
+      "breakpoints": true
     }
   ]
 }

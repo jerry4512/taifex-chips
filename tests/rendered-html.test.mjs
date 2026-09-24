@@ -20,10 +20,14 @@ test("server renders the futures positioning page", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>台指期籌碼｜日盤未平倉買賣超<\/title>/i);
+  assert.match(html, /<title>台指期籌碼｜夜盤推估與日盤未平倉<\/title>/i);
+  assert.match(html, /Telegram 籌碼推播/);
+  assert.match(html, /早上：夜盤推估 SOP/);
   assert.match(html, /下午：日盤未平倉買賣超/);
   assert.match(html, /最新三大法人買賣金額/);
   assert.match(html, /官方約當淨 OI/);
+  assert.match(html, /開盤預估約當淨 OI/);
+  assert.match(html, /夜盤約當買賣超/);
   assert.match(html, /2026\/09\/21 因缺少前一交易日基準/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
@@ -41,10 +45,17 @@ test("starter preview is removed", async () => {
 });
 
 test("offers a date-specific database acquisition flow", async () => {
-  const [page, route, hosting] = await Promise.all([
+  const [page, route, afterHoursRoute, hosting] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(
       new URL("../app/api/trading-doctor/taifex-futures/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../app/api/trading-doctor/taifex-futures-after-hours/route.ts",
+        import.meta.url,
+      ),
       "utf8",
     ),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
@@ -52,7 +63,26 @@ test("offers a date-specific database acquisition flow", async () => {
 
   assert.match(page, /type="date"/);
   assert.match(page, /取得資料/);
+  assert.match(page, /取得夜盤資料/);
   assert.doesNotMatch(page, /重新整理/);
   assert.match(route, /export async function POST/);
+  assert.match(afterHoursRoute, /export async function GET/);
+  assert.match(afterHoursRoute, /export async function POST/);
+  assert.match(afterHoursRoute, /futContractsDateAh|TAIFEX_AFTER_HOURS_SOURCE/);
   assert.equal(JSON.parse(hosting).d1, "DB");
+});
+
+test("documents the Telegram environment variables without committing secrets", async () => {
+  const [example, gitignore, envTypes] = await Promise.all([
+    readFile(new URL("../.env.example", import.meta.url), "utf8"),
+    readFile(new URL("../.gitignore", import.meta.url), "utf8"),
+    readFile(new URL("../cloudflare-env.d.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(example, /^TELEGRAM_BOT_TOKEN=$/m);
+  assert.match(example, /^TELEGRAM_CHAT_IDS=$/m);
+  assert.match(gitignore, /^\.env\*$/m);
+  assert.match(gitignore, /^!\.env\.example$/m);
+  assert.match(envTypes, /TELEGRAM_BOT_TOKEN\?: string;/);
+  assert.match(envTypes, /TELEGRAM_CHAT_IDS\?: string;/);
 });

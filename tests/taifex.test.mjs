@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   equivalentTxContracts,
+  estimateOpenEquivalentNetOi,
   excelRound,
+  getTaifexAfterHours,
   getTaifexFutures,
   parseForeignNetPositions,
 } from "../lib/taifex.ts";
@@ -102,4 +104,38 @@ test("keeps the first interpretation blank and calculates the next trading day",
   assert.equal(response.data[1].nightEquivalentNet, 229);
   assert.equal(response.data[1].pureDayChange, -2895);
   assert.equal(response.data[1].interpretation, "偏空");
+});
+
+test("reads the after-hours session on its own for the morning estimate", async () => {
+  const night = { 臺股期貨: -910, 小型臺指期貨: -3274, 微型臺指期貨: -10301 };
+
+  const mockFetch = async (input) => {
+    const url = new URL(String(input));
+    assert.equal(url.pathname, "/cht/3/futContractsDateAh");
+    assert.equal(url.searchParams.get("queryDate"), "2026/09/24");
+    return new Response(reportHtml(night, "night"), {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  };
+
+  const positions = await getTaifexAfterHours("2026-09-24", mockFetch);
+  assert.deepEqual(positions, night);
+  assert.equal(equivalentTxContracts(positions), -2244);
+});
+
+test("returns null when the after-hours session has no disclosure", async () => {
+  const mockFetch = async () =>
+    new Response("<html><body><table></table></body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+
+  assert.equal(await getTaifexAfterHours("2026-09-26", mockFetch), null);
+});
+
+test("estimates the opening equivalent net OI from the previous official close", () => {
+  // 2026/09/23 官方約當淨 OI -75255 + 2026/09/24 夜盤約當買賣超 -2244
+  assert.equal(estimateOpenEquivalentNetOi(-75255, -2244), -77499);
+  assert.equal(estimateOpenEquivalentNetOi(null, -2244), null);
 });

@@ -9,3 +9,12 @@ export const dailyFuturesPositions = sqliteTable("daily_futures_positions", {
   collectedAt: text("collected_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+export const nightlyFuturesPositions = sqliteTable("nightly_futures_positions", {
+  date: text("date").primaryKey(),
+  txNightNet: integer("tx_night_net").notNull(),
+  mtxNightNet: integer("mtx_night_net").notNull(),
+  tmfNightNet: integer("tmf_night_net").notNull(),
+  collectedAt: text("collected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

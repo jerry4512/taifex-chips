@@ -1,6 +1,8 @@
 const TAIFEX_ORIGIN = "https://www.taifex.com.tw";
 
 export const DEFAULT_START_DATE = "2026-09-21";
+export const TAIFEX_FULL_DAY_SOURCE = `${TAIFEX_ORIGIN}/cht/3/futContractsDate`;
+export const TAIFEX_AFTER_HOURS_SOURCE = `${TAIFEX_ORIGIN}/cht/3/futContractsDateAh`;
 export const MAX_RANGE_DAYS = 31;
 
 export const TAIFEX_PRODUCTS = [
@@ -39,6 +41,25 @@ export interface TaifexFuturesResponse {
     night: string;
   };
   data: TaifexFuturesRow[];
+}
+
+/** 早上：夜盤推估 SOP —— 盤前以夜盤（盤後交易時段）籌碼推估開盤約當淨 OI。 */
+export interface TaifexAfterHoursRow {
+  date: string;
+  txNightNet: number;
+  mtxNightNet: number;
+  tmfNightNet: number;
+  nightEquivalentNet: number;
+  previousOfficialEquivalentNetOi: number | null;
+  estimatedOpenEquivalentNetOi: number | null;
+}
+
+export interface TaifexAfterHoursResponse {
+  startDate: string;
+  endDate: string;
+  generatedAt: string;
+  source: string;
+  data: TaifexAfterHoursRow[];
 }
 
 function decodeHtml(value: string): string {
@@ -144,6 +165,16 @@ export function interpretChipChange(value: number): ChipInterpretation {
   if (value > 0) return "偏多";
   if (value < 0) return "偏空";
   return "無顯著變化";
+}
+
+/** 開盤預估約當淨 OI＝前一交易日官方約當淨 OI ＋ 今日夜盤約當買賣超。 */
+export function estimateOpenEquivalentNetOi(
+  previousOfficialEquivalentNetOi: number | null,
+  nightEquivalentNet: number,
+): number | null {
+  return previousOfficialEquivalentNetOi === null
+    ? null
+    : previousOfficialEquivalentNetOi + nightEquivalentNet;
 }
 
 function parseIsoDate(value: string): Date | null {
@@ -283,9 +314,29 @@ export async function getTaifexFutures(
     endDate,
     generatedAt: new Date().toISOString(),
     sources: {
-      fullDay: `${TAIFEX_ORIGIN}/cht/3/futContractsDate`,
-      night: `${TAIFEX_ORIGIN}/cht/3/futContractsDateAh`,
+      fullDay: TAIFEX_FULL_DAY_SOURCE,
+      night: TAIFEX_AFTER_HOURS_SOURCE,
     },
     data,
   };
+}
+
+/**
+ * 早上：夜盤推估 SOP 的資料來源。
+ * 期交所將 D-1 15:00 至 D 05:00 的盤後交易時段歸屬於交易日 D，
+ * 所以交易日當天早上即可取得該日夜盤籌碼，用於盤前推估。
+ * 該日尚未揭露（非交易日或資料未公布）時回傳 null。
+ */
+export async function getTaifexAfterHours(
+  date: string,
+  fetcher: typeof fetch = fetch,
+): Promise<ForeignNetPositions | null> {
+  try {
+    const html = await fetchTaifexReport("futContractsDateAh", date, fetcher);
+    return parseForeignNetPositions(html, "night");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "未知錯誤";
+    if (message.startsWith("期交所資料未完整揭露")) return null;
+    throw error;
+  }
 }

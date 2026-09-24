@@ -19,8 +19,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const metadataBase = new URL(`${protocol}://${host}`);
-  const title = "台指期籌碼｜日盤未平倉買賣超";
-  const description = "追蹤外資台指、小台、微台未平倉淨額與純日盤籌碼方向。";
+  const title = "台指期籌碼｜夜盤推估與日盤未平倉";
+  const description = "早上以期交所夜盤籌碼推估開盤約當淨 OI，下午追蹤外資台指、小台、微台未平倉淨額與純日盤籌碼方向。";
 
   return {
     metadataBase,
@@ -34,7 +34,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       title,
       description,
-      images: [{ url: "/og-dark.png", width: 1200, height: 630, alt: "台指期籌碼－日盤未平倉買賣超" }],
+      images: [{ url: "/og-dark.png", width: 1200, height: 630, alt: "台指期籌碼－夜盤推估與日盤未平倉" }],
     },
     twitter: {
       card: "summary_large_image",
