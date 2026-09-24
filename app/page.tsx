@@ -6,8 +6,13 @@ import type {
   TaifexFuturesResponse,
   TaifexFuturesRow,
 } from "../lib/taifex";
+import type { TwseBfi82uResponse, TwseInstitutionFlow } from "../lib/twse";
 
 const numberFormatter = new Intl.NumberFormat("zh-TW");
+const hundredMillionFormatter = new Intl.NumberFormat("zh-TW", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
 const dateTimeFormatter = new Intl.DateTimeFormat("zh-TW", {
   timeZone: "Asia/Taipei",
   month: "numeric",
@@ -29,6 +34,10 @@ function formatNumber(value: number | null): string {
 
 function formatDate(value: string): string {
   return value.replaceAll("-", "/");
+}
+
+function formatHundredMillion(value: number): string {
+  return hundredMillionFormatter.format(value / 100_000_000);
 }
 
 function valueTone(value: number | null): string {
@@ -107,13 +116,53 @@ function DataRow({ row, isFirst }: { row: TaifexFuturesRow; isFirst: boolean }) 
   );
 }
 
+function SpotFlowCard({ flow }: { flow: TwseInstitutionFlow }) {
+  return (
+    <article className={`spot-flow-card ${flow.name === "三大法人合計" ? "spot-total" : ""}`}>
+      <div className="spot-flow-heading">
+        <h3>{flow.name}</h3>
+        <span>買賣差額</span>
+      </div>
+      <strong className={valueTone(flow.difference)}>{formatHundredMillion(flow.difference)}</strong>
+      <dl>
+        <div>
+          <dt>買進</dt>
+          <dd>{formatHundredMillion(flow.buy)}</dd>
+        </div>
+        <div>
+          <dt>賣出</dt>
+          <dd>{formatHundredMillion(flow.sell)}</dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
 export default function Home() {
+  const [spotReport, setSpotReport] = useState<TwseBfi82uResponse | null>(null);
+  const [spotError, setSpotError] = useState<string | null>(null);
+  const [spotLoading, setSpotLoading] = useState(true);
   const [report, setReport] = useState<TaifexFuturesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState(taipeiToday);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const loadSpotReport = useCallback(async () => {
+    setSpotLoading(true);
+    setSpotError(null);
+    try {
+      const response = await fetch("/api/trading-doctor/bfi82u", { cache: "no-store" });
+      const payload = (await response.json()) as TwseBfi82uResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "無法取得證交所資料");
+      setSpotReport(payload);
+    } catch (reason) {
+      setSpotError(reason instanceof Error ? reason.message : "無法取得證交所資料");
+    } finally {
+      setSpotLoading(false);
+    }
+  }, []);
 
   const loadReport = useCallback(async () => {
     setLoading(true);
@@ -157,8 +206,9 @@ export default function Home() {
   }, [selectedDate]);
 
   useEffect(() => {
+    void loadSpotReport();
     void loadReport();
-  }, [loadReport]);
+  }, [loadReport, loadSpotReport]);
 
   const latest = report?.data.at(-1) ?? null;
   const rangeLabel = report
@@ -181,9 +231,39 @@ export default function Home() {
         </a>
         <div className="header-meta">
           <span className="live-dot" aria-hidden="true" />
-          <span>期交所官方資料</span>
+          <span>官方市場資料</span>
         </div>
       </header>
+
+      <section className="spot-section" aria-labelledby="spot-title">
+        <div className="spot-section-heading">
+          <div>
+            <p className="section-kicker">證交所現貨</p>
+            <h2 id="spot-title">最新三大法人買賣金額</h2>
+          </div>
+          <div className="spot-date">
+            <span>資料日期</span>
+            <strong>{spotReport ? formatDate(spotReport.date) : "—"}</strong>
+            <small>單位：億元</small>
+          </div>
+        </div>
+
+        {spotError ? (
+          <div className="spot-state error-message" role="alert">
+            <span>{spotError}</span>
+            <button type="button" onClick={() => void loadSpotReport()}>再試一次</button>
+          </div>
+        ) : spotLoading && !spotReport ? (
+          <div className="spot-state" role="status">
+            <span className="loading-line" />
+            <span>正在取得證交所最新資料…</span>
+          </div>
+        ) : (
+          <div className="spot-grid">
+            {spotReport?.data.map((flow) => <SpotFlowCard key={flow.name} flow={flow} />)}
+          </div>
+        )}
+      </section>
 
       <section className="hero" id="top">
         <div>
@@ -317,6 +397,9 @@ export default function Home() {
 
       <footer>
         <span>資料來源</span>
+        <a href="https://www.twse.com.tw/zh/trading/foreign/bfi82u.html" target="_blank" rel="noreferrer">
+          臺灣證券交易所・三大法人
+        </a>
         <a href="https://www.taifex.com.tw/cht/3/futContractsDate" target="_blank" rel="noreferrer">
           臺灣期貨交易所・區分各期貨契約
         </a>

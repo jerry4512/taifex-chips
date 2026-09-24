@@ -22,6 +22,7 @@ test("server renders the futures positioning page", async () => {
   const html = await response.text();
   assert.match(html, /<title>台指期籌碼｜日盤未平倉買賣超<\/title>/i);
   assert.match(html, /下午：日盤未平倉買賣超/);
+  assert.match(html, /最新三大法人買賣金額/);
   assert.match(html, /官方約當淨 OI/);
   assert.match(html, /2026\/09\/21 因缺少前一交易日基準/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
