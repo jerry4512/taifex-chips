@@ -1,0 +1,16 @@
+services:
+  taifex-chips:
+    build: .
+    image: taifex-chips
+    ports:
+      - "3000:3000"
+    # TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_IDS；檔案不存在時照樣啟動，只是無法推播。
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - d1-data:/app/.wrangler/state
+    restart: unless-stopped
+
+volumes:
+  d1-data:
