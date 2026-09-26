@@ -163,6 +163,20 @@ npm install
 npm run dev     # http://localhost:3000
 ```
 
+## Docker
+
+不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，沒有 D1，不能用）。
+
+```bash
+docker compose up -d --build   # http://localhost:3000
+docker compose logs -f         # 看伺服器紀錄
+docker compose down            # 停止（資料保留）
+```
+
+- **Telegram 設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，只是無法推播。
+- **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
+- **改程式後**：要加 `--build` 重建映像。
+
 ## 驗證
 
 ```bash
