@@ -14,5 +14,16 @@ services:
       - d1-data:/app/.wrangler/state
     restart: unless-stopped
 
+  # 平日 14:50 起每 5 分鐘自動抓夜盤、日盤、證交所，到齊後推播 Telegram（見 lib/daily-schedule.ts）。
+  # 共用主服務的網路，才能用 localhost 呼叫（vite preview 會擋其他 Host）。
+  scheduler:
+    image: taifex-chips
+    pull_policy: never
+    command: ["node", "scripts/daily-schedule-trigger.mjs"]
+    network_mode: "service:taifex-chips"
+    depends_on:
+      - taifex-chips
+    restart: unless-stopped
+
 volumes:
   d1-data:
