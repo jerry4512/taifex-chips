@@ -47,6 +47,8 @@ export default defineConfig(async () => {
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
+    // Docker 映像在 Railway 上以 vite preview 對外服務，需允許 Railway 網域，否則回 Blocked request。
+    preview: { allowedHosts: [".up.railway.app"] },
     plugins: [
       vinext(),
       sites(),

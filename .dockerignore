@@ -1,0 +1,16 @@
+node_modules
+dist
+.wrangler
+.vinext
+.next
+.git
+.claude
+outputs
+work
+*.log
+.DS_Store
+# secret 不打包進映像，改由 compose 的 env_file 在啟動時帶入。
+.env*
+啟動工具.command
+Dockerfile
+compose.yaml

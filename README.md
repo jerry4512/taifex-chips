@@ -100,6 +100,8 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
+| `POST` | `/api/auth/login` | 登入表單（`username`、`password`、`next`），成功設 cookie 並轉回原頁 |
+| `POST` | `/api/auth/logout` | 清除登入 cookie，轉回 `/login` |
 | `GET` | `/api/trading-doctor/taifex-futures-after-hours` | 讀出夜盤明細與開盤推估 |
 | `POST` | `/api/trading-doctor/taifex-futures-after-hours` | `{"date":"YYYY-MM-DD"}`，抓期交所夜盤並存入資料庫 |
 | `GET` | `/api/trading-doctor/taifex-futures` | 讀出日盤明細與籌碼解讀 |
@@ -107,6 +109,8 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 | `GET` | `/api/trading-doctor/bfi82u` | 證交所最新三大法人買賣金額 |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
+
+除了登入／登出，所有頁面與 API 都要先登入：未登入時網頁會導向 `/login`，API 回 `401 {"error":"請先登入"}`。
 
 兩個 `GET` 期貨端點都是直接讀資料庫，不會連外；要更新資料請用對應的 `POST`（畫面上的「取得夜盤資料」與「取得資料」按鈕）。日期不可早於 2026/09/21，也不可晚於台北當日。
 
@@ -154,6 +158,46 @@ npx wrangler secret put TELEGRAM_CHAT_IDS
 
 ---
 
+## 登入
+
+整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料的 D1 分開。唯一要設定的環境變數是 `DATABASE_URL`：
+
+```bash
+DATABASE_URL=postgresql://…         # Railway 上填 ${{Postgres.DATABASE_URL}}
+
+npm run users -- add ck       # 新增帳號或改密碼（密碼問兩次、不顯示）
+npm run users -- remove ck    # 刪除帳號
+npm run users -- list         # 列出帳號
+npm run users -- logout-all   # 換簽章金鑰，所有人最晚 5 分鐘內需重新登入
+```
+
+`auth_users`：
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `username` | `TEXT PRIMARY KEY` | 英數與 `._-`，1–64 字 |
+| `password_hash` | `TEXT` | `pbkdf2.<次數>.<salt>.<hash>` |
+| `created_at`／`updated_at` | `TIMESTAMPTZ` | 建立／最後改密碼時間 |
+
+`auth_settings`：目前只有一筆 `key = 'session_secret'`，是 64 字元的隨機 hex，用來簽登入 cookie。第一次有人登入時自動產生；刪掉這筆（`logout-all`）下次會再產生新的，所有既有登入隨之失效。
+
+- 兩張表不存在時會自動建立：`npm run users` 每次執行都會先 `CREATE TABLE IF NOT EXISTS`；網站則是查詢時遇到「資料表不存在」（`42P01`）才建表並重試，所以全新的資料庫直接登入也不會出錯，平常查詢也不會多跑建表指令。`postgres.railway.internal` 只有 Railway 內部連得到，在自己電腦上執行請把 `.env` 的 `DATABASE_URL` 換成 Railway 後台的 `DATABASE_PUBLIC_URL`。
+- 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，資料庫不存明碼。
+- 登入後發一個 30 天有效的 HMAC 簽章 cookie（`HttpOnly; SameSite=Lax`，https 下加 `Secure`）。之後每個請求只驗簽章、不查帳號；簽章金鑰讀到後在記憶體暫存 5 分鐘，所以平常只有登入時才會連 Postgres。
+- **刪除帳號只會擋下之後的登入**，已登入的裝置要等 cookie 到期；要踢掉所有人請用 `npm run users -- logout-all`，最晚 5 分鐘（金鑰暫存時間）生效。
+- `DATABASE_URL` 沒設時一律擋下；Postgres 連不上且金鑰不在暫存時，網頁導向登入頁並顯示「無法連線帳號資料庫」、API 回 503，不會因此變成公開。
+- 目前沒有登入失敗次數限制，請使用夠長的密碼（工具要求至少 8 字元）。
+
+正式部署：
+
+```bash
+npx wrangler secret put DATABASE_URL
+```
+
+Railway 則在服務的 Variables 新增 `DATABASE_URL`，值填 `${{Postgres.DATABASE_URL}}`。
+
+---
+
 ## 本機執行
 
 需要 Node.js 22.13 以上。
@@ -162,6 +206,20 @@ npx wrangler secret put TELEGRAM_CHAT_IDS
 npm install
 npm run dev     # http://localhost:3000
 ```
+
+## Docker
+
+不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，沒有 D1，不能用）。
+
+```bash
+docker compose up -d --build   # http://localhost:3000
+docker compose logs -f         # 看伺服器紀錄
+docker compose down            # 停止（資料保留）
+```
+
+- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_IDS`、`DATABASE_URL` 三個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
+- **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
+- **改程式後**：要加 `--build` 重建映像。
 
 ## 驗證
 

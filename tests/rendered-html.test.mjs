@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { createSessionToken, SESSION_COOKIE } from "../lib/auth.ts";
 
-async function render(path = "/") {
+// 每次執行隨機產生，不在原始碼寫死任何 secret；正式環境的金鑰存在 Postgres。
+const SESSION_SECRET = crypto.randomUUID() + crypto.randomUUID();
+const sessionCookie = `${SESSION_COOKIE}=${await createSessionToken("tester", SESSION_SECRET)}`;
+
+async function render(path = "/", { cookie = sessionCookie } = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const { createWorker } = await import(workerUrl.href);
+  const worker = createWorker({ loadSecret: async () => SESSION_SECRET });
 
   return worker.fetch(
-    new Request(`http://localhost${path}`, { headers: { accept: "text/html" } }),
+    new Request(`http://localhost${path}`, { headers: { accept: "text/html", ...(cookie ? { cookie } : {}) } }),
     { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
@@ -30,6 +36,21 @@ test("server renders the futures positioning page", async () => {
   assert.match(html, /夜盤約當買賣超/);
   assert.match(html, /2026\/09\/21 因缺少前一交易日基準/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
+  assert.match(html, /action="\/api\/auth\/logout"/);
+});
+
+test("requires login before rendering the dashboard", async () => {
+  const blocked = await render("/", { cookie: null });
+  assert.equal(blocked.status, 302);
+  assert.equal(blocked.headers.get("location"), "/login");
+
+  const login = await render("/login?error=invalid&next=%2F%3Fa%3D1", { cookie: null });
+  assert.equal(login.status, 200);
+  const html = await login.text();
+  assert.match(html, /action="\/api\/auth\/login"/);
+  assert.match(html, /帳號或密碼錯誤/);
+  assert.match(html, /name="next" value="\/\?a=1"/);
+  assert.doesNotMatch(html, /早上：夜盤推估 SOP/);
 });
 
 test("starter preview is removed", async () => {
