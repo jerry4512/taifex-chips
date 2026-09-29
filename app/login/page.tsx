@@ -36,11 +36,11 @@ export default async function LoginPage({
         ) : null}
         <label>
           帳號
-          <input name="username" autoComplete="username" required autoFocus />
+          <input name="username" autoComplete="username" placeholder="請輸入帳號" required autoFocus />
         </label>
         <label>
           密碼
-          <input name="password" type="password" autoComplete="current-password" required />
+          <input name="password" type="password" autoComplete="current-password" placeholder="請輸入密碼" required />
         </label>
         <input type="hidden" name="next" value={next} />
         <button type="submit">登入</button>
