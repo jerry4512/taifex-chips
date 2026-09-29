@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type {
   ChipInterpretation,
   TaifexAfterHoursResponse,
@@ -181,16 +181,16 @@ function SpotFlowCard({ flow }: { flow: TwseInstitutionFlow }) {
 export default function Home() {
   const [spotReport, setSpotReport] = useState<TwseBfi82uResponse | null>(null);
   const [spotError, setSpotError] = useState<string | null>(null);
-  const [spotLoading, setSpotLoading] = useState(true);
+  const [spotLoading, setSpotLoading] = useState(false);
   const [report, setReport] = useState<TaifexFuturesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState(taipeiToday);
   const [notice, setNotice] = useState<string | null>(null);
   const [nightReport, setNightReport] = useState<TaifexAfterHoursResponse | null>(null);
   const [nightError, setNightError] = useState<string | null>(null);
-  const [nightLoading, setNightLoading] = useState(true);
+  const [nightLoading, setNightLoading] = useState(false);
   const [nightSaving, setNightSaving] = useState(false);
   const [nightDate, setNightDate] = useState(taipeiToday);
   const [nightNotice, setNightNotice] = useState<string | null>(null);
@@ -330,13 +330,6 @@ export default function Home() {
     }
   }, [selectedDate]);
 
-  useEffect(() => {
-    void loadSpotReport();
-    void loadNightReport();
-    void loadReport();
-    void loadTelegramStatus();
-  }, [loadNightReport, loadReport, loadSpotReport, loadTelegramStatus]);
-
   const latest = report?.data.at(-1) ?? null;
   const latestNight = nightReport?.data.at(-1) ?? null;
   const nightRangeLabel = nightReport
@@ -375,7 +368,7 @@ export default function Home() {
           <h2 id="telegram-title">Telegram 籌碼推播</h2>
           <p className="telegram-hint">
             {telegramStatus === null
-              ? "正在讀取 .env 設定…"
+              ? "按「傳送籌碼報告」時才讀取 .env 設定"
               : telegramStatus.configured
                 ? `已設定 ${telegramStatus.chats.length} 位收件人`
                 : (telegramStatus.error ?? "尚未設定，請填寫 .env")}
@@ -397,7 +390,7 @@ export default function Home() {
             type="button"
             className="telegram-send"
             onClick={() => void sendTelegramTest()}
-            disabled={telegramSending || telegramStatus?.configured !== true}
+            disabled={telegramSending || telegramStatus?.configured === false}
           >
             {telegramSending ? "傳送中…" : "傳送籌碼報告"}
           </button>
@@ -432,6 +425,9 @@ export default function Home() {
             <span>資料日期</span>
             <strong>{spotReport ? formatDate(spotReport.date) : "—"}</strong>
             <small>單位：億元</small>
+            <button type="button" onClick={() => void loadSpotReport()} disabled={spotLoading}>
+              {spotLoading ? "取得中…" : "取得證交所資料"}
+            </button>
           </div>
         </div>
 
@@ -445,9 +441,13 @@ export default function Home() {
             <span className="loading-line" />
             <span>正在取得證交所最新資料…</span>
           </div>
-        ) : (
+        ) : spotReport ? (
           <div className="spot-grid">
-            {spotReport?.data.map((flow) => <SpotFlowCard key={flow.name} flow={flow} />)}
+            {spotReport.data.map((flow) => <SpotFlowCard key={flow.name} flow={flow} />)}
+          </div>
+        ) : (
+          <div className="spot-state" role="status">
+            <span>請按「取得證交所資料」載入最新一天的買賣金額。</span>
           </div>
         )}
       </section>
@@ -564,8 +564,8 @@ export default function Home() {
           </div>
         ) : (
           <div className="state-message" role="status">
-            <strong>資料庫目前沒有夜盤資料</strong>
-            <span>請選擇日期後按「取得夜盤資料」。</span>
+            <strong>尚未顯示夜盤資料</strong>
+            <span>請選擇日期後按「取得夜盤資料」，會一併列出資料庫已存的所有日期。</span>
           </div>
         )}
 
@@ -694,8 +694,8 @@ export default function Home() {
           </div>
         ) : (
           <div className="state-message" role="status">
-            <strong>資料庫目前沒有資料</strong>
-            <span>請選擇日期後按「取得資料」。</span>
+            <strong>尚未顯示資料</strong>
+            <span>請選擇日期後按「取得資料」，會一併列出資料庫已存的所有日期。</span>
           </div>
         )}
 
