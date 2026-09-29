@@ -3,12 +3,12 @@ import {
   checkCredentials,
   createSessionToken,
   isSecureRequest,
-  readAuthConfig,
+  isValidUsername,
   safeNextPath,
   sessionCookie,
-  type AuthConfig,
   type AuthEnv,
 } from "../../../../lib/auth";
+import { findPasswordHash, loadSessionSecret, withSql } from "../../../../lib/auth-db";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ function redirectTo(request: Request, path: string, cookie?: string) {
   return response;
 }
 
-function loginPath(error: "invalid" | "config", next: string) {
+function loginPath(error: "invalid" | "config" | "db", next: string) {
   const params = new URLSearchParams({ error });
   if (next !== "/") params.set("next", next);
   return `/login?${params}`;
@@ -32,18 +32,34 @@ export async function POST(request: Request) {
   const password = String(form?.get("password") ?? "");
   const next = safeNextPath(String(form?.get("next") ?? ""));
 
-  let config: AuthConfig;
-  try {
-    const { env } = await import("cloudflare:workers");
-    config = readAuthConfig(env as unknown as AuthEnv);
-  } catch {
-    return redirectTo(request, loginPath("config", next));
+  const { env } = await import("cloudflare:workers");
+  const authEnv = env as unknown as AuthEnv;
+
+  if (!authEnv.DATABASE_URL?.trim()) return redirectTo(request, loginPath("config", next));
+
+  // 格式不符的帳號不可能存在，直接當成帳密錯誤，不必連資料庫。
+  let stored: string | null = null;
+  if (isValidUsername(username)) {
+    try {
+      stored = await withSql(authEnv.DATABASE_URL, (sql) => findPasswordHash(sql, username));
+    } catch (error) {
+      console.error("讀取登入帳號失敗", error);
+      return redirectTo(request, loginPath("db", next));
+    }
   }
 
-  if (!username || !password || !(await checkCredentials(config, username, password))) {
+  if (!password || !(await checkCredentials(stored, password))) {
     return redirectTo(request, loginPath("invalid", next));
   }
 
-  const token = await createSessionToken(username, config.secret);
+  let secret: string;
+  try {
+    secret = await loadSessionSecret(authEnv.DATABASE_URL);
+  } catch (error) {
+    console.error("讀取登入金鑰失敗", error);
+    return redirectTo(request, loginPath("db", next));
+  }
+
+  const token = await createSessionToken(username, secret);
   return redirectTo(request, next, sessionCookie(token, isSecureRequest(request)));
 }

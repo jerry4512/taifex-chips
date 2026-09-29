@@ -1,25 +1,18 @@
 /**
- * 帳號密碼登入：帳號清單放在環境變數 `AUTH_USERS`（只存 PBKDF2 雜湊），
- * 登入後發一個以 `AUTH_SECRET` 做 HMAC 簽章的 cookie，不需要資料庫。
- * 只用 WebCrypto，Worker 與 Node（測試、雜湊產生工具）都能跑。
+ * 帳號密碼登入：帳號存在 Postgres `auth_users`（只存 PBKDF2 雜湊，讀寫見 `lib/auth-db.ts`），
+ * 登入後發一個 HMAC 簽章的 cookie（金鑰也存在 Postgres，第一次用到時自動產生），
+ * 之後每個請求只驗簽章、不查帳號。
+ * 這支只用 WebCrypto，Worker 與 Node（測試、帳號管理工具）都能跑。
  */
 
 export interface AuthEnv {
-  AUTH_USERS?: string;
-  AUTH_SECRET?: string;
-}
-
-export interface AuthConfig {
-  /** 帳號 → 儲存的密碼雜湊 */
-  users: Map<string, string>;
-  secret: string;
+  DATABASE_URL?: string;
 }
 
 export const SESSION_COOKIE = "taifex_session";
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 /** workerd 的 PBKDF2 上限是 100000 次。 */
 export const PBKDF2_ITERATIONS = 100_000;
-const MIN_SECRET_LENGTH = 32;
 const HASH_PREFIX = "pbkdf2";
 
 const encoder = new TextEncoder();
@@ -74,38 +67,18 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return constantTimeEqual(await pbkdf2(password, salt, iterations), expected);
 }
 
-/** 逗號或換行分隔，每筆 `帳號:雜湊`。 */
-export function parseAuthUsers(raw: string | undefined): Map<string, string> {
-  const users = new Map<string, string>();
-  for (const entry of (raw ?? "").split(/[,\n]/)) {
-    const trimmed = entry.trim();
-    if (!trimmed) continue;
-    const separator = trimmed.lastIndexOf(":");
-    const username = trimmed.slice(0, separator).trim();
-    const hash = trimmed.slice(separator + 1).trim();
-    if (separator <= 0 || !hash.startsWith(`${HASH_PREFIX}.`)) {
-      throw new Error(`AUTH_USERS 格式錯誤：「${trimmed.slice(0, 20)}」應為「帳號:pbkdf2.…」，請用 npm run hash-password 產生`);
-    }
-    users.set(username, hash);
-  }
-  return users;
-}
-
-export function readAuthConfig(env: AuthEnv): AuthConfig {
-  const users = parseAuthUsers(env.AUTH_USERS);
-  if (users.size === 0) throw new Error("尚未設定 AUTH_USERS，無法登入");
-  const secret = env.AUTH_SECRET?.trim() ?? "";
-  if (secret.length < MIN_SECRET_LENGTH) throw new Error(`AUTH_SECRET 未設定或少於 ${MIN_SECRET_LENGTH} 個字元`);
-  return { users, secret };
+/** 帳號只允許英數與 `._-`，長度 1–64，建立帳號與登入都用同一規則。 */
+export function isValidUsername(username: string): boolean {
+  return /^[A-Za-z0-9._-]{1,64}$/.test(username);
 }
 
 /** 帳號不存在時仍跑一次 PBKDF2，避免從回應時間猜出哪些帳號存在。 */
 const DUMMY_HASH = `${HASH_PREFIX}.${PBKDF2_ITERATIONS}.AAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`;
 
-export async function checkCredentials(config: AuthConfig, username: string, password: string): Promise<boolean> {
-  const stored = config.users.get(username);
+/** `stored` 是資料庫查到的雜湊，查無帳號時傳 null。 */
+export async function checkCredentials(stored: string | null, password: string): Promise<boolean> {
   const ok = await verifyPassword(password, stored ?? DUMMY_HASH);
-  return ok && stored !== undefined;
+  return ok && stored !== null;
 }
 
 async function hmacKey(secret: string): Promise<CryptoKey> {
@@ -118,19 +91,22 @@ export async function createSessionToken(username: string, secret: string, now =
   return `${payload}.${toBase64Url(new Uint8Array(signature))}`;
 }
 
-/** 簽章正確、未過期、且帳號仍在 AUTH_USERS 裡才算有效；回傳帳號。 */
-export async function verifySessionToken(token: string, config: AuthConfig, now = Date.now()): Promise<string | null> {
+/**
+ * 簽章正確且未過期才算有效，回傳帳號。為了不讓每個請求都連資料庫，這裡不回查帳號是否還在；
+ * 刪除帳號只會擋下之後的登入，要踢掉既有登入請用 `npm run users -- logout-all` 換金鑰。
+ */
+export async function verifySessionToken(token: string, secret: string, now = Date.now()): Promise<string | null> {
   const [payload, signatureText, extra] = token.split(".");
   const signature = fromBase64Url(signatureText ?? "");
   if (!payload || !signature || extra !== undefined) return null;
 
-  const valid = await crypto.subtle.verify("HMAC", await hmacKey(config.secret), signature as BufferSource, encoder.encode(payload));
+  const valid = await crypto.subtle.verify("HMAC", await hmacKey(secret), signature as BufferSource, encoder.encode(payload));
   if (!valid) return null;
 
   try {
     const bytes = fromBase64Url(payload);
     const { u, exp } = JSON.parse(new TextDecoder().decode(bytes ?? new Uint8Array())) as { u?: unknown; exp?: unknown };
-    if (typeof u !== "string" || typeof exp !== "number" || exp <= now || !config.users.has(u)) return null;
+    if (typeof u !== "string" || typeof exp !== "number" || exp <= now) return null;
     return u;
   } catch {
     return null;
@@ -174,27 +150,37 @@ export function isPublicPath(pathname: string): boolean {
 
 /**
  * Worker 入口呼叫：已登入或公開路徑回 null 放行；否則網頁導向 /login、API 回 401。
- * 設定缺漏時一律擋下（fail closed），不會因為忘了設 secret 就變成公開。
+ * `loadSecret` 讀取簽章金鑰（正式環境從 Postgres），只有帶著 cookie 時才會呼叫；
+ * 讀不到金鑰時一律擋下（fail closed），網頁導向 /login?error=db、API 回 503。
  */
-export async function gateRequest(request: Request, env: AuthEnv): Promise<Response | null> {
+export async function gateRequest(request: Request, loadSecret: () => Promise<string>): Promise<Response | null> {
   const url = new URL(request.url);
   if (isPublicPath(url.pathname)) return null;
-
-  let config: AuthConfig | null = null;
-  try {
-    config = readAuthConfig(env);
-  } catch {
-    config = null;
-  }
+  const isApi = url.pathname.startsWith("/api/");
 
   const token = readCookie(request.headers.get("cookie"), SESSION_COOKIE);
-  if (config && token && (await verifySessionToken(token, config))) return null;
-
-  if (url.pathname.startsWith("/api/")) {
-    return Response.json({ error: "請先登入" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  if (token) {
+    let secret: string;
+    try {
+      secret = await loadSecret();
+    } catch (error) {
+      console.error("讀取登入金鑰失敗", error);
+      return isApi
+        ? Response.json({ error: "無法連線帳號資料庫" }, { status: 503, headers: { "Cache-Control": "no-store" } })
+        : redirectToLogin(url, "db");
+    }
+    if (await verifySessionToken(token, secret)) return null;
   }
 
+  if (isApi) {
+    return Response.json({ error: "請先登入" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+  }
+  return redirectToLogin(url);
+}
+
+function redirectToLogin(url: URL, error?: "db"): Response {
   const loginUrl = new URL("/login", url);
+  if (error) loginUrl.searchParams.set("error", error);
   const next = `${url.pathname}${url.search}`;
   if (next !== "/") loginUrl.searchParams.set("next", next);
   return new Response(null, { status: 302, headers: { Location: `${loginUrl.pathname}${loginUrl.search}`, "Cache-Control": "no-store" } });

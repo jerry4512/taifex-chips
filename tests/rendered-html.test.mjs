@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { createSessionToken, hashPassword, SESSION_COOKIE } from "../lib/auth.ts";
+import { createSessionToken, SESSION_COOKIE } from "../lib/auth.ts";
 
-// 每次執行隨機產生，不在原始碼寫死任何 secret。
-const AUTH_SECRET = crypto.randomUUID() + crypto.randomUUID();
-const authEnv = { AUTH_USERS: `tester:${await hashPassword("pw")}`, AUTH_SECRET };
-const sessionCookie = `${SESSION_COOKIE}=${await createSessionToken("tester", AUTH_SECRET)}`;
+// 每次執行隨機產生，不在原始碼寫死任何 secret；正式環境的金鑰存在 Postgres。
+const SESSION_SECRET = crypto.randomUUID() + crypto.randomUUID();
+const sessionCookie = `${SESSION_COOKIE}=${await createSessionToken("tester", SESSION_SECRET)}`;
 
 async function render(path = "/", { cookie = sessionCookie } = {}) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  const { createWorker } = await import(workerUrl.href);
+  const worker = createWorker({ loadSecret: async () => SESSION_SECRET });
 
   return worker.fetch(
     new Request(`http://localhost${path}`, { headers: { accept: "text/html", ...(cookie ? { cookie } : {}) } }),
-    { ...authEnv, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
 }

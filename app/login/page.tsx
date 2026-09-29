@@ -4,7 +4,8 @@ export const dynamic = "force-dynamic";
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid: "帳號或密碼錯誤",
-  config: "伺服器尚未設定登入帳號（AUTH_USERS、AUTH_SECRET），請聯絡管理者",
+  config: "伺服器尚未完成登入設定（DATABASE_URL），請聯絡管理者",
+  db: "無法連線帳號資料庫，請稍後再試",
 };
 
 export default async function LoginPage({

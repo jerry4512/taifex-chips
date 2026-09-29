@@ -5,9 +5,7 @@ declare namespace Cloudflare {
     TELEGRAM_BOT_TOKEN?: string;
     /** 逗號分隔的收件人，格式 `標籤:chatId`，見 .env.example。 */
     TELEGRAM_CHAT_IDS?: string;
-    /** 逗號分隔的登入帳號，格式 `帳號:pbkdf2.…`，用 `npm run hash-password` 產生。 */
-    AUTH_USERS?: string;
-    /** 簽章登入 cookie 用的隨機字串（至少 32 字元），更換會讓所有人登出。 */
-    AUTH_SECRET?: string;
+    /** 存登入帳號的 Postgres 連線字串，帳號用 `npm run users` 管理。 */
+    DATABASE_URL?: string;
   }
 }

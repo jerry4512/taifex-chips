@@ -5,8 +5,7 @@ import {
   createSessionToken,
   gateRequest,
   hashPassword,
-  parseAuthUsers,
-  readAuthConfig,
+  isValidUsername,
   safeNextPath,
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -16,11 +15,6 @@ import {
 
 // 每次執行隨機產生，不在原始碼寫死任何 secret。
 const SECRET = crypto.randomUUID() + crypto.randomUUID();
-
-async function makeConfig() {
-  const env = { AUTH_USERS: `ck:${await hashPassword("正確密碼")}`, AUTH_SECRET: SECRET };
-  return { env, config: readAuthConfig(env) };
-}
 
 test("hashPassword avoids $ and verifies only the right password", async () => {
   const stored = await hashPassword("s3cret!");
@@ -32,41 +26,33 @@ test("hashPassword avoids $ and verifies only the right password", async () => {
   assert.equal(await verifyPassword("s3cret!", "garbage"), false);
 });
 
-test("parseAuthUsers reads comma or newline separated entries", async () => {
-  const hash = await hashPassword("x");
-  const users = parseAuthUsers(`ck:${hash},\n  guest : ${hash} `);
-  assert.deepEqual([...users.keys()], ["ck", "guest"]);
-  assert.equal(parseAuthUsers("").size, 0);
-  assert.throws(() => parseAuthUsers("ck:plaintext"), /AUTH_USERS 格式錯誤/);
-});
-
-test("readAuthConfig fails closed when users or secret are missing", async () => {
-  const hash = await hashPassword("x");
-  assert.throws(() => readAuthConfig({ AUTH_SECRET: SECRET }), /尚未設定 AUTH_USERS/);
-  assert.throws(() => readAuthConfig({ AUTH_USERS: `ck:${hash}`, AUTH_SECRET: "short" }), /AUTH_SECRET/);
+test("isValidUsername allows only safe characters", () => {
+  assert.equal(isValidUsername("ck.lin_01-a"), true);
+  assert.equal(isValidUsername(""), false);
+  assert.equal(isValidUsername("a b"), false);
+  assert.equal(isValidUsername("x".repeat(65)), false);
+  assert.equal(isValidUsername("ck'; DROP TABLE auth_users;--"), false);
 });
 
 test("checkCredentials rejects unknown users and wrong passwords", async () => {
-  const { config } = await makeConfig();
-  assert.equal(await checkCredentials(config, "ck", "正確密碼"), true);
-  assert.equal(await checkCredentials(config, "ck", "錯誤"), false);
-  assert.equal(await checkCredentials(config, "nobody", "正確密碼"), false);
+  const stored = await hashPassword("正確密碼");
+  assert.equal(await checkCredentials(stored, "正確密碼"), true);
+  assert.equal(await checkCredentials(stored, "錯誤"), false);
+  assert.equal(await checkCredentials(null, "正確密碼"), false);
 });
 
-test("session tokens expire, resist tampering, and die with removed users", async () => {
-  const { config } = await makeConfig();
+test("session tokens expire and resist tampering", async () => {
   const now = Date.UTC(2026, 8, 29);
   const token = await createSessionToken("ck", SECRET, now);
 
-  assert.equal(await verifySessionToken(token, config, now + 1000), "ck");
-  assert.equal(await verifySessionToken(token, config, now + SESSION_MAX_AGE_SECONDS * 1000 + 1), null);
+  assert.equal(await verifySessionToken(token, SECRET, now + 1000), "ck");
+  assert.equal(await verifySessionToken(token, SECRET, now + SESSION_MAX_AGE_SECONDS * 1000 + 1), null);
 
   const [payload, signature] = token.split(".");
   const forged = Buffer.from(JSON.stringify({ u: "ck", exp: now + 10 ** 12 })).toString("base64url");
-  assert.equal(await verifySessionToken(`${forged}.${signature}`, config, now), null);
-  assert.equal(await verifySessionToken(`${payload}.${signature}x`, config, now), null);
-  assert.equal(await verifySessionToken(token, { ...config, secret: `${SECRET}-rotated` }, now), null);
-  assert.equal(await verifySessionToken(token, { ...config, users: new Map() }, now), null);
+  assert.equal(await verifySessionToken(`${forged}.${signature}`, SECRET, now), null);
+  assert.equal(await verifySessionToken(`${payload}.${signature}x`, SECRET, now), null);
+  assert.equal(await verifySessionToken(token, `${SECRET}-rotated`, now), null);
 });
 
 test("safeNextPath only allows same-site paths", () => {
@@ -78,22 +64,49 @@ test("safeNextPath only allows same-site paths", () => {
 });
 
 test("gateRequest redirects pages, 401s APIs, and lets sessions through", async () => {
-  const { env } = await makeConfig();
   const token = await createSessionToken("ck", SECRET);
+  let secretLoads = 0;
+  const loadSecret = async () => {
+    secretLoads += 1;
+    return SECRET;
+  };
 
-  const page = await gateRequest(new Request("http://localhost/?x=1"), env);
+  const page = await gateRequest(new Request("http://localhost/?x=1"), loadSecret);
   assert.equal(page?.status, 302);
   assert.equal(page?.headers.get("location"), "/login?next=%2F%3Fx%3D1");
 
-  const api = await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u"), env);
+  const api = await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u"), loadSecret);
   assert.equal(api?.status, 401);
   assert.deepEqual(await api?.json(), { error: "請先登入" });
+  // 沒帶 cookie 的請求不需要讀金鑰，不會連資料庫。
+  assert.equal(secretLoads, 0);
 
-  assert.equal(await gateRequest(new Request("http://localhost/login"), env), null);
-  assert.equal(await gateRequest(new Request("http://localhost/assets/page.js"), env), null);
+  assert.equal(await gateRequest(new Request("http://localhost/login"), loadSecret), null);
+  assert.equal(await gateRequest(new Request("http://localhost/assets/page.js"), loadSecret), null);
 
-  const withCookie = new Request("http://localhost/", { headers: { cookie: `a=b; ${SESSION_COOKIE}=${token}` } });
-  assert.equal(await gateRequest(withCookie, env), null);
-  // 設定被拿掉時，舊 cookie 也不再有效。
-  assert.equal((await gateRequest(withCookie, {}))?.status, 302);
+  const withCookie = () => new Request("http://localhost/", { headers: { cookie: `a=b; ${SESSION_COOKIE}=${token}` } });
+  assert.equal(await gateRequest(withCookie(), loadSecret), null);
+  // 金鑰換過之後，舊 cookie 就不再有效。
+  assert.equal((await gateRequest(withCookie(), async () => `${SECRET}-rotated`))?.status, 302);
+});
+
+test("gateRequest fails closed when the secret cannot be loaded", async () => {
+  const token = await createSessionToken("ck", SECRET);
+  const cookie = `${SESSION_COOKIE}=${token}`;
+  const broken = async () => {
+    throw new Error("connection refused");
+  };
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const page = await gateRequest(new Request("http://localhost/", { headers: { cookie } }), broken);
+    assert.equal(page?.status, 302);
+    assert.equal(page?.headers.get("location"), "/login?error=db");
+
+    const api = await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u", { headers: { cookie } }), broken);
+    assert.equal(api?.status, 503);
+    assert.deepEqual(await api?.json(), { error: "無法連線帳號資料庫" });
+  } finally {
+    console.error = originalError;
+  }
 });

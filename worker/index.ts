@@ -2,12 +2,12 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { gateRequest } from "../lib/auth";
+import { loadSessionSecret } from "../lib/auth-db";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
-  AUTH_USERS?: string;
-  AUTH_SECRET?: string;
+  DATABASE_URL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -28,27 +28,30 @@ interface ExecutionContext {
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
-const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
+/** 測試可以注入假的金鑰來源，正式環境從 Postgres 讀取。 */
+export function createWorker({ loadSecret }: { loadSecret: (env: Env) => Promise<string> }) {
+  return {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+      const url = new URL(request.url);
 
-    // 整站需登入：未登入的網頁導向 /login，API 回 401。
-    const blocked = await gateRequest(request, env);
-    if (blocked) return blocked;
+      // 整站需登入：未登入的網頁導向 /login，API 回 401。
+      const blocked = await gateRequest(request, () => loadSecret(env));
+      if (blocked) return blocked;
 
-    if (url.pathname === "/_vinext/image") {
-      const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
-        transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
-          return result.response();
-        },
-      }, allowedWidths);
-    }
+      if (url.pathname === "/_vinext/image") {
+        const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
+        return handleImageOptimization(request, {
+          fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+          transformImage: async (body, { width, format, quality }) => {
+            const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+            return result.response();
+          },
+        }, allowedWidths);
+      }
 
-    return handler.fetch(request, env, ctx);
-  },
-};
+      return handler.fetch(request, env, ctx);
+    },
+  };
+}
 
-export default worker;
+export default createWorker({ loadSecret: (env) => loadSessionSecret(env.DATABASE_URL) });
