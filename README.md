@@ -100,6 +100,8 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 
 | 方法 | 路徑 | 說明 |
 | --- | --- | --- |
+| `POST` | `/api/auth/login` | 登入表單（`username`、`password`、`next`），成功設 cookie 並轉回原頁 |
+| `POST` | `/api/auth/logout` | 清除登入 cookie，轉回 `/login` |
 | `GET` | `/api/trading-doctor/taifex-futures-after-hours` | 讀出夜盤明細與開盤推估 |
 | `POST` | `/api/trading-doctor/taifex-futures-after-hours` | `{"date":"YYYY-MM-DD"}`，抓期交所夜盤並存入資料庫 |
 | `GET` | `/api/trading-doctor/taifex-futures` | 讀出日盤明細與籌碼解讀 |
@@ -107,6 +109,8 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 | `GET` | `/api/trading-doctor/bfi82u` | 證交所最新三大法人買賣金額 |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
+
+除了登入／登出，所有頁面與 API 都要先登入：未登入時網頁會導向 `/login`，API 回 `401 {"error":"請先登入"}`。
 
 兩個 `GET` 期貨端點都是直接讀資料庫，不會連外；要更新資料請用對應的 `POST`（畫面上的「取得夜盤資料」與「取得資料」按鈕）。日期不可早於 2026/09/21，也不可晚於台北當日。
 
@@ -154,6 +158,32 @@ npx wrangler secret put TELEGRAM_CHAT_IDS
 
 ---
 
+## 登入
+
+整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼由自己管理，不接第三方 OAuth，也不使用資料庫：
+
+```bash
+npm run hash-password -- ck    # 輸入兩次密碼，印出 ck:pbkdf2.100000.…
+AUTH_USERS=ck:pbkdf2.100000.…,老婆:pbkdf2.100000.…
+AUTH_SECRET=至少 32 字元的隨機字串
+```
+
+- 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，`AUTH_USERS` 裡不會出現明碼。分隔符號用 `.` 而非 `$`，避免 `.env`、docker compose、Railway 把 `$` 當成變數展開。
+- 登入後發一個 30 天有效、以 `AUTH_SECRET` 做 HMAC 簽章的 `HttpOnly; SameSite=Lax` cookie（https 下加 `Secure`）。從 `AUTH_USERS` 刪掉某帳號，該帳號既有的登入立即失效；換 `AUTH_SECRET` 則所有人都要重新登入。
+- 任一變數沒設或格式錯誤時一律擋下（登入頁會顯示「伺服器尚未設定登入帳號」），不會因為漏設就變成公開。本機 `npm run dev` 同樣需要在 `.env` 設好這兩個值。
+- 目前沒有登入失敗次數限制，請使用夠長的密碼。
+
+正式部署：
+
+```bash
+npx wrangler secret put AUTH_USERS
+npx wrangler secret put AUTH_SECRET
+```
+
+Railway 則在服務的 Variables 新增 `AUTH_USERS`、`AUTH_SECRET`。
+
+---
+
 ## 本機執行
 
 需要 Node.js 22.13 以上。
@@ -173,7 +203,7 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，只是無法推播。
+- **Telegram 與登入設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `AUTH_USERS`／`AUTH_SECRET` 就無法登入，也無法推播。
 - **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
 - **改程式後**：要加 `--build` 重建映像。
 
