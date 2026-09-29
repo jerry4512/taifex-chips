@@ -160,27 +160,41 @@ npx wrangler secret put TELEGRAM_CHAT_IDS
 
 ## 登入
 
-整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼由自己管理，不接第三方 OAuth，也不使用資料庫：
+整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料的 D1 分開。唯一要設定的環境變數是 `DATABASE_URL`：
 
 ```bash
-npm run hash-password -- ck    # 輸入兩次密碼，印出 ck:pbkdf2.100000.…
-AUTH_USERS=ck:pbkdf2.100000.…,老婆:pbkdf2.100000.…
-AUTH_SECRET=至少 32 字元的隨機字串
+DATABASE_URL=postgresql://…         # Railway 上填 ${{Postgres.DATABASE_URL}}
+
+npm run users -- add ck       # 新增帳號或改密碼（密碼問兩次、不顯示）
+npm run users -- remove ck    # 刪除帳號
+npm run users -- list         # 列出帳號
+npm run users -- logout-all   # 換簽章金鑰，所有人最晚 5 分鐘內需重新登入
 ```
 
-- 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，`AUTH_USERS` 裡不會出現明碼。分隔符號用 `.` 而非 `$`，避免 `.env`、docker compose、Railway 把 `$` 當成變數展開。
-- 登入後發一個 30 天有效、以 `AUTH_SECRET` 做 HMAC 簽章的 `HttpOnly; SameSite=Lax` cookie（https 下加 `Secure`）。從 `AUTH_USERS` 刪掉某帳號，該帳號既有的登入立即失效；換 `AUTH_SECRET` 則所有人都要重新登入。
-- 任一變數沒設或格式錯誤時一律擋下（登入頁會顯示「伺服器尚未設定登入帳號」），不會因為漏設就變成公開。本機 `npm run dev` 同樣需要在 `.env` 設好這兩個值。
-- 目前沒有登入失敗次數限制，請使用夠長的密碼。
+`auth_users`：
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `username` | `TEXT PRIMARY KEY` | 英數與 `._-`，1–64 字 |
+| `password_hash` | `TEXT` | `pbkdf2.<次數>.<salt>.<hash>` |
+| `created_at`／`updated_at` | `TIMESTAMPTZ` | 建立／最後改密碼時間 |
+
+`auth_settings`：目前只有一筆 `key = 'session_secret'`，是 64 字元的隨機 hex，用來簽登入 cookie。第一次有人登入時自動產生；刪掉這筆（`logout-all`）下次會再產生新的，所有既有登入隨之失效。
+
+- 兩張表都會自動 `CREATE TABLE IF NOT EXISTS`（`npm run users` 或第一次登入時）。`postgres.railway.internal` 只有 Railway 內部連得到，在自己電腦上執行請把 `.env` 的 `DATABASE_URL` 換成 Railway 後台的 `DATABASE_PUBLIC_URL`。
+- 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，資料庫不存明碼。
+- 登入後發一個 30 天有效的 HMAC 簽章 cookie（`HttpOnly; SameSite=Lax`，https 下加 `Secure`）。之後每個請求只驗簽章、不查帳號；簽章金鑰讀到後在記憶體暫存 5 分鐘，所以平常只有登入時才會連 Postgres。
+- **刪除帳號只會擋下之後的登入**，已登入的裝置要等 cookie 到期；要踢掉所有人請用 `npm run users -- logout-all`，最晚 5 分鐘（金鑰暫存時間）生效。
+- `DATABASE_URL` 沒設時一律擋下；Postgres 連不上且金鑰不在暫存時，網頁導向登入頁並顯示「無法連線帳號資料庫」、API 回 503，不會因此變成公開。
+- 目前沒有登入失敗次數限制，請使用夠長的密碼（工具要求至少 8 字元）。
 
 正式部署：
 
 ```bash
-npx wrangler secret put AUTH_USERS
-npx wrangler secret put AUTH_SECRET
+npx wrangler secret put DATABASE_URL
 ```
 
-Railway 則在服務的 Variables 新增 `AUTH_USERS`、`AUTH_SECRET`。
+Railway 則在服務的 Variables 新增 `DATABASE_URL`，值填 `${{Postgres.DATABASE_URL}}`。
 
 ---
 
@@ -203,7 +217,7 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 與登入設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `AUTH_USERS`／`AUTH_SECRET` 就無法登入，也無法推播。
+- **Telegram 與登入設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
 - **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
 - **改程式後**：要加 `--build` 重建映像。
 
