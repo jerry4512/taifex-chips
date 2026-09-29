@@ -363,6 +363,9 @@ export default function Home() {
         <div className="header-meta">
           <span className="live-dot" aria-hidden="true" />
           <span>官方市場資料</span>
+          <form className="logout-form" method="post" action="/api/auth/logout">
+            <button type="submit">登出</button>
+          </form>
         </div>
       </header>
 

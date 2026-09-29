@@ -1,0 +1,49 @@
+import { safeNextPath } from "../../lib/auth";
+
+export const dynamic = "force-dynamic";
+
+const ERROR_MESSAGES: Record<string, string> = {
+  invalid: "帳號或密碼錯誤",
+  config: "伺服器尚未設定登入帳號（AUTH_USERS、AUTH_SECRET），請聯絡管理者",
+};
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+  const next = safeNextPath(first(params.next));
+  const error = ERROR_MESSAGES[first(params.error) ?? ""];
+
+  return (
+    <main className="login-page">
+      <form className="login-card" method="post" action="/api/auth/login">
+        <div className="brand">
+          <span className="brand-mark">TX</span>
+          <span>
+            <strong>台指期籌碼</strong>
+            <small>TAIFEX POSITION TRACKER</small>
+          </span>
+        </div>
+        <h1>登入</h1>
+        {error ? (
+          <p className="login-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <label>
+          帳號
+          <input name="username" autoComplete="username" required autoFocus />
+        </label>
+        <label>
+          密碼
+          <input name="password" type="password" autoComplete="current-password" required />
+        </label>
+        <input type="hidden" name="next" value={next} />
+        <button type="submit">登入</button>
+      </form>
+    </main>
+  );
+}
