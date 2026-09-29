@@ -217,7 +217,7 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 與登入設定**：沿用同一份 `.env`，由 `compose.yaml` 的 `env_file` 在啟動時帶入（`.env` 不會被打包進映像）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
+- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_IDS`、`DATABASE_URL` 三個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
 - **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
 - **改程式後**：要加 `--build` 重建映像。
 
