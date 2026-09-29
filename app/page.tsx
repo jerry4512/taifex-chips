@@ -284,7 +284,6 @@ export default function Home() {
 
   const acquireNightDate = useCallback(async () => {
     setNightSaving(true);
-    setNightError(null);
     setNightNotice(null);
     try {
       const response = await fetch("/api/trading-doctor/taifex-futures-after-hours", {
@@ -298,9 +297,10 @@ export default function Home() {
       };
       if (!response.ok) throw new Error(payload.error ?? "無法取得期交所夜盤資料");
       setNightReport(payload);
+      setNightError(null);
       setNightNotice(`${formatDate(payload.savedDate ?? nightDate)} 夜盤資料已儲存`);
     } catch (reason) {
-      setNightError(reason instanceof Error ? reason.message : "無法取得期交所夜盤資料");
+      window.alert(reason instanceof Error ? reason.message : "無法取得期交所夜盤資料");
     } finally {
       setNightSaving(false);
     }
@@ -308,7 +308,6 @@ export default function Home() {
 
   const acquireSelectedDate = useCallback(async () => {
     setSaving(true);
-    setError(null);
     setNotice(null);
     try {
       const response = await fetch("/api/trading-doctor/taifex-futures", {
@@ -322,9 +321,10 @@ export default function Home() {
       };
       if (!response.ok) throw new Error(payload.error ?? "無法取得期交所資料");
       setReport(payload);
+      setError(null);
       setNotice(`${formatDate(payload.savedDate ?? selectedDate)} 資料已儲存`);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "無法取得期交所資料");
+      window.alert(reason instanceof Error ? reason.message : "無法取得期交所資料");
     } finally {
       setSaving(false);
     }
