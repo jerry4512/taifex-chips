@@ -49,6 +49,8 @@ test("requires login before rendering the dashboard", async () => {
   const html = await login.text();
   assert.match(html, /action="\/api\/auth\/login"/);
   assert.match(html, /帳號或密碼錯誤/);
+  assert.match(html, /placeholder="請輸入帳號"/);
+  assert.match(html, /placeholder="請輸入密碼"/);
   assert.match(html, /name="next" value="\/\?a=1"/);
   assert.doesNotMatch(html, /早上：夜盤推估 SOP/);
 });
