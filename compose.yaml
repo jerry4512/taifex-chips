@@ -4,10 +4,12 @@ services:
     image: taifex-chips
     ports:
       - "3000:3000"
-    # TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_IDS；檔案不存在時照樣啟動，只是無法推播。
-    env_file:
-      - path: .env
-        required: false
+    # 值由 compose 從專案目錄的 .env 帶入（只傳這三個）；.env 不存在或沒填時為空字串，
+    # 照樣啟動，但無法登入與推播。
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_IDS: ${TELEGRAM_CHAT_IDS:-}
+      DATABASE_URL: ${DATABASE_URL:-}
     volumes:
       - d1-data:/app/.wrangler/state
     restart: unless-stopped

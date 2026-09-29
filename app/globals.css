@@ -708,6 +708,78 @@ td:last-child {
   }
 }
 
+.logout-form {
+  margin-left: 8px;
+}
+
+.logout-form button {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.login-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.login-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 360px;
+  padding: 32px 28px;
+  width: 100%;
+}
+
+.login-card h1 {
+  font-size: 20px;
+  margin: 8px 0 0;
+}
+
+.login-card label {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 6px;
+}
+
+.login-card input {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 15px;
+  padding: 10px 12px;
+}
+
+.login-card input:focus-visible {
+  border-color: var(--orange);
+  outline: 3px solid rgba(233, 107, 23, 0.3);
+}
+
+.login-card button {
+  font-size: 15px;
+  margin-top: 4px;
+  padding: 11px;
+}
+
+.login-error {
+  background: var(--red-soft);
+  border: 1px solid var(--red);
+  border-radius: 7px;
+  color: var(--red);
+  font-size: 13px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
 @media (max-width: 800px) {
   .site-header {
     min-height: 66px;
