@@ -20,8 +20,8 @@ ENV WRANGLER_SEND_METRICS=false \
   # 讓 compose 傳入的 TELEGRAM_* 環境變數成為 Worker 的 env。
   CLOUDFLARE_INCLUDE_PROCESS_ENV=true
 
-# 本機 D1 資料存在這裡，請掛 volume 保存。
-VOLUME ["/app/.wrangler/state"]
+# 本機 D1 資料存在 /app/.wrangler/state，需掛 volume 保存（compose 用 d1-data；
+# Railway 不支援 VOLUME 指令，改在後台新增 Railway Volume 掛到同一路徑）。
 
 EXPOSE 3000
 
