@@ -1,7 +1,7 @@
 /**
  * 登入帳號與 cookie 簽章金鑰存在 Postgres（Railway），與籌碼資料的 D1 分開。
  * Worker 不能跨請求共用 TCP 連線，所以每次都開一條、用完即關；
- * 金鑰讀到後暫存在記憶體，平常只有登入時才會連資料庫。
+ * 金鑰讀到後暫存在記憶體，平常只有登入時才會連資料庫。資料表不存在時會自動建立。
  */
 import postgres from "postgres";
 
@@ -40,16 +40,33 @@ export async function withSql<T>(databaseUrl: string | undefined, run: (sql: Sql
   }
 }
 
-export async function findPasswordHash(sql: Sql, username: string): Promise<string | null> {
-  const rows = await sql<{ password_hash: string }[]>`
-    SELECT password_hash FROM auth_users WHERE username = ${username}
-  `;
-  return rows[0]?.password_hash ?? null;
-}
-
-export async function ensureAuthTables(sql: Sql): Promise<void> {
+export async function ensureAuthTables(sql: Pick<Sql, "unsafe">): Promise<void> {
   await sql.unsafe(USERS_TABLE_SQL);
   await sql.unsafe(SETTINGS_TABLE_SQL);
+}
+
+/** Postgres 的 undefined_table 錯誤碼。 */
+const UNDEFINED_TABLE = "42P01";
+
+/**
+ * 先直接查；資料表不存在（全新資料庫、或表被刪掉）時才建表並重試一次，
+ * 平常的查詢不會多跑 CREATE TABLE。
+ */
+export async function withAuthTables<T>(sql: Pick<Sql, "unsafe">, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code !== UNDEFINED_TABLE) throw error;
+    await ensureAuthTables(sql);
+    return run();
+  }
+}
+
+export async function findPasswordHash(sql: Sql, username: string): Promise<string | null> {
+  const rows = await withAuthTables(sql, () => sql<{ password_hash: string }[]>`
+    SELECT password_hash FROM auth_users WHERE username = ${username}
+  `);
+  return rows[0]?.password_hash ?? null;
 }
 
 function randomSecret(): string {
@@ -59,13 +76,14 @@ function randomSecret(): string {
 
 /** 沒有金鑰就產生一把；多個請求同時搶著建立時，以先寫入的為準。 */
 export async function getOrCreateSessionSecret(sql: Sql): Promise<string> {
-  await ensureAuthTables(sql);
-  await sql`
-    INSERT INTO auth_settings (key, value) VALUES (${SESSION_SECRET_KEY}, ${randomSecret()})
-    ON CONFLICT (key) DO NOTHING
-  `;
-  const rows = await sql<{ value: string }[]>`SELECT value FROM auth_settings WHERE key = ${SESSION_SECRET_KEY}`;
-  return rows[0].value;
+  return withAuthTables(sql, async () => {
+    await sql`
+      INSERT INTO auth_settings (key, value) VALUES (${SESSION_SECRET_KEY}, ${randomSecret()})
+      ON CONFLICT (key) DO NOTHING
+    `;
+    const rows = await sql<{ value: string }[]>`SELECT value FROM auth_settings WHERE key = ${SESSION_SECRET_KEY}`;
+    return rows[0].value;
+  });
 }
 
 /** 刪掉金鑰：下次讀取會產生新的一把，所有既有登入隨之失效。 */

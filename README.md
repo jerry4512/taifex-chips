@@ -181,7 +181,7 @@ npm run users -- logout-all   # 換簽章金鑰，所有人最晚 5 分鐘內需
 
 `auth_settings`：目前只有一筆 `key = 'session_secret'`，是 64 字元的隨機 hex，用來簽登入 cookie。第一次有人登入時自動產生；刪掉這筆（`logout-all`）下次會再產生新的，所有既有登入隨之失效。
 
-- 兩張表都會自動 `CREATE TABLE IF NOT EXISTS`（`npm run users` 或第一次登入時）。`postgres.railway.internal` 只有 Railway 內部連得到，在自己電腦上執行請把 `.env` 的 `DATABASE_URL` 換成 Railway 後台的 `DATABASE_PUBLIC_URL`。
+- 兩張表不存在時會自動建立：`npm run users` 每次執行都會先 `CREATE TABLE IF NOT EXISTS`；網站則是查詢時遇到「資料表不存在」（`42P01`）才建表並重試，所以全新的資料庫直接登入也不會出錯，平常查詢也不會多跑建表指令。`postgres.railway.internal` 只有 Railway 內部連得到，在自己電腦上執行請把 `.env` 的 `DATABASE_URL` 換成 Railway 後台的 `DATABASE_PUBLIC_URL`。
 - 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，資料庫不存明碼。
 - 登入後發一個 30 天有效的 HMAC 簽章 cookie（`HttpOnly; SameSite=Lax`，https 下加 `Secure`）。之後每個請求只驗簽章、不查帳號；簽章金鑰讀到後在記憶體暫存 5 分鐘，所以平常只有登入時才會連 Postgres。
 - **刪除帳號只會擋下之後的登入**，已登入的裝置要等 cookie 到期；要踢掉所有人請用 `npm run users -- logout-all`，最晚 5 分鐘（金鑰暫存時間）生效。
