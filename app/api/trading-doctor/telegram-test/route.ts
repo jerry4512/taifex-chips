@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { listFuturesPositions } from "../../../../lib/futures-db";
+import { collectReportInput } from "../../../../lib/chip-report";
 import {
   broadcastTelegramMessage,
   buildChipReport,
   readTelegramConfig,
-  type ChipReportInput,
   type TelegramChatTarget,
   type TelegramDeliveryResult,
   type TelegramEnv,
 } from "../../../../lib/telegram";
-import { getLatestBfi82u } from "../../../../lib/twse";
 
 export const dynamic = "force-dynamic";
 
@@ -31,26 +29,6 @@ export interface TelegramTestResponse {
 async function telegramEnv(): Promise<TelegramEnv> {
   const { env } = await import("cloudflare:workers");
   return env as unknown as TelegramEnv;
-}
-
-/** 任一來源掛掉不應該擋住整份報告，缺的段落由 buildChipReport 標成「尚無資料」。 */
-async function collectReportInput(): Promise<ChipReportInput> {
-  const [spot, futures] = await Promise.all([
-    getLatestBfi82u().then(
-      (report) => ({ date: report.date, flows: report.data }),
-      () => null,
-    ),
-    listFuturesPositions().then((rows) => rows.at(-1) ?? null, () => null),
-  ]);
-
-  return {
-    spot,
-    futures: futures && {
-      date: futures.date,
-      pureDayChange: futures.pureDayChange,
-      interpretation: futures.interpretation,
-    },
-  };
 }
 
 export async function GET() {

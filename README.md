@@ -109,6 +109,7 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 | `GET` | `/api/trading-doctor/bfi82u` | 證交所最新三大法人買賣金額 |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
+| `POST` | `/api/trading-doctor/daily-schedule` | 排程用：補抓今天還沒拿到的夜盤／日盤／證交所，到齊後推播（見下方「平日自動排程」） |
 
 除了登入／登出，所有頁面與 API 都要先登入：未登入時網頁會導向 `/login`，API 回 `401 {"error":"請先登入"}`。
 
@@ -220,6 +221,18 @@ docker compose down            # 停止（資料保留）
 - **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_IDS`、`DATABASE_URL` 三個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
 - **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
 - **改程式後**：要加 `--build` 重建映像。
+
+### 平日自動排程
+
+`compose.yaml` 的 `scheduler` 容器每 5 分鐘呼叫一次 `POST /api/trading-doctor/daily-schedule`，實際判斷在 `lib/daily-schedule.ts`：
+
+- **時段**：週一到週五、台北時間 14:50 起；週末與 14:50 前直接略過，不連外。
+- **每輪只補缺的**：夜盤、日盤看資料庫有沒有當天那列；證交所看回傳的資料日期是不是今天（只記「已取得」，不存數值）。
+- **補抓前幾天**：每天第一輪（通常是 14:50）先補最近 7 天內資料庫缺的平日夜盤／日盤，一天只補一次（休市日本來就抓不到，不重複白打）。只補資料、不補發當天的報告。缺一天會讓隔天的純日盤變化量、籌碼型態與開盤推估改用更早一天當基準而算錯，所以要先補齊再抓今天。
+- **三項到齊**：推播一次籌碼報告（與「傳送籌碼報告」按鈕同一份）。至少一位收件人成功就算完成；全部失敗則下一輪重試。
+- **18:00 仍未到齊**（例如休市日）：推播一則「截至 18:00 仍未取得：…」通知，當天不再重試。
+- 完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
+- 看執行紀錄：`docker compose logs -f scheduler`（略過的輪次不寫紀錄）。
 
 ## 驗證
 

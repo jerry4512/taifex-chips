@@ -1,3 +1,4 @@
+import type { DailyJob } from "./daily-schedule";
 import type {
   ForeignNetPositions,
   TaifexAfterHoursRow,
@@ -180,6 +181,17 @@ async function createSchema(): Promise<D1Database> {
     ),
   );
 
+  await database
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS daily_schedule_jobs (
+        date text NOT NULL,
+        job text NOT NULL,
+        completed_at text NOT NULL,
+        PRIMARY KEY(date, job)
+      )`,
+    )
+    .run();
+
   return database;
 }
 
@@ -346,4 +358,29 @@ export async function listNightlyPositions(): Promise<TaifexAfterHoursRow[]> {
       ),
     };
   });
+}
+
+/** 夜盤、日盤看原始資料表有沒有當天那列；其餘看排程完成紀錄。 */
+export async function isDailyJobDone(date: string, job: DailyJob): Promise<boolean> {
+  const database = await initializeDatabase();
+  const statement =
+    job === "night"
+      ? database.prepare("SELECT 1 FROM nightly_futures_positions WHERE date = ?").bind(date)
+      : job === "day"
+        ? database.prepare("SELECT 1 FROM daily_futures_positions WHERE date = ?").bind(date)
+        : database
+            .prepare("SELECT 1 FROM daily_schedule_jobs WHERE date = ? AND job = ?")
+            .bind(date, job);
+  return (await statement.first()) !== null;
+}
+
+export async function markDailyJobDone(date: string, job: DailyJob): Promise<void> {
+  const database = await initializeDatabase();
+  await database
+    .prepare(
+      `INSERT OR IGNORE INTO daily_schedule_jobs (date, job, completed_at)
+      VALUES (?, ?, ?)`,
+    )
+    .bind(date, job, new Date().toISOString())
+    .run();
 }

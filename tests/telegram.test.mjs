@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   broadcastTelegramMessage,
   buildChipReport,
+  buildMissingDataNotice,
   parseChatTargets,
   readTelegramConfig,
 } from "../lib/telegram.ts";
@@ -156,4 +157,11 @@ test("uses Taiwanese colour convention for the daily direction", () => {
     }),
     /純日盤變化量 -557\n籌碼型態 偏空 🟢/,
   );
+});
+
+test("lists what is still missing when the daily schedule gives up", () => {
+  const notice = buildMissingDataNotice("2026-09-29", ["期交所日盤", "證交所三大法人"], "18:00");
+  assert.match(notice, /^⚠️ 台指期籌碼｜2026\/09\/29$/m);
+  assert.match(notice, /截至 18:00 仍未取得：期交所日盤、證交所三大法人/);
+  assert.match(notice, /今日不推播籌碼報告/);
 });

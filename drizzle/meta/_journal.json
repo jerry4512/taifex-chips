@@ -15,6 +15,13 @@
       "when": 1790253000000,
       "tag": "0001_nightly_futures_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790653955757,
+      "tag": "0002_daily_schedule_jobs",
+      "breakpoints": true
     }
   ]
 }

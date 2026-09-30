@@ -185,6 +185,20 @@ export function buildChipReport(input: ChipReportInput, now = new Date()): strin
   ].join("\n");
 }
 
+/** 排程到放棄時間仍有資料沒到齊時的通知，例如休市日。 */
+export function buildMissingDataNotice(
+  date: string,
+  missingLabels: readonly string[],
+  giveUpTime: string,
+): string {
+  return [
+    `⚠️ 台指期籌碼｜${slashDate(date)}`,
+    "",
+    `截至 ${giveUpTime} 仍未取得：${missingLabels.join("、")}`,
+    "今日不推播籌碼報告，請確認是否為休市日或資料延遲公布。",
+  ].join("\n");
+}
+
 async function callSendMessage(
   token: string,
   chatId: string,
