@@ -1,10 +1,10 @@
 const TELEGRAM_API_ORIGIN = "https://api.telegram.org";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-/** `.env` 讀得到的 Telegram 設定。 */
+/** 推播需要的環境變數；收件人存在 DATABASE_URL 指向的 Postgres（見 lib/telegram-db.ts）。 */
 export interface TelegramEnv {
   TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_CHAT_IDS?: string;
+  DATABASE_URL?: string;
 }
 
 export interface TelegramChatTarget {
@@ -19,52 +19,15 @@ export interface TelegramDeliveryResult extends TelegramChatTarget {
 }
 
 /** 個人／群組為數字 id，公開頻道可用 @username。 */
-function isValidChatId(value: string): boolean {
+export function isValidChatId(value: string): boolean {
   return /^-?\d+$/.test(value) || /^@[A-Za-z][A-Za-z0-9_]{3,}$/.test(value);
 }
 
-/**
- * 解析 TELEGRAM_CHAT_IDS。
- * 以「,」或換行分隔多個對象，每筆可寫成 `標籤:chatId` 或只寫 `chatId`；
- * 標籤本身可以包含冒號，所以用最後一個冒號切分。
- */
-export function parseChatTargets(raw: string | undefined): TelegramChatTarget[] {
-  const entries = (raw ?? "")
-    .split(/[,\n]/)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0 && !entry.startsWith("#"));
-
-  const targets: TelegramChatTarget[] = [];
-  const invalid: string[] = [];
-
-  for (const entry of entries) {
-    const separator = entry.lastIndexOf(":");
-    const label = separator === -1 ? "" : entry.slice(0, separator).trim();
-    const chatId = (separator === -1 ? entry : entry.slice(separator + 1)).trim();
-
-    if (!isValidChatId(chatId)) {
-      invalid.push(entry);
-      continue;
-    }
-    targets.push({ label: label || chatId, chatId });
-  }
-
-  if (invalid.length > 0) {
-    throw new Error(
-      `TELEGRAM_CHAT_IDS 格式錯誤：${invalid.join("、")}（每筆請寫成「標籤:chatId」或只寫 chatId）`,
-    );
-  }
-
-  const seen = new Set<string>();
-  return targets.filter((target) => {
-    if (seen.has(target.chatId)) return false;
-    seen.add(target.chatId);
-    return true;
-  });
-}
-
-/** 讀出設定；缺少 token 或收件人時丟出可直接顯示給使用者的錯誤。 */
-export function readTelegramConfig(env: TelegramEnv): {
+/** 組合 token 與資料庫讀出的收件人；缺少任一項時丟出可直接顯示給使用者的錯誤。 */
+export function readTelegramConfig(
+  env: TelegramEnv,
+  targets: readonly TelegramChatTarget[],
+): {
   token: string;
   targets: TelegramChatTarget[];
 } {
@@ -73,12 +36,11 @@ export function readTelegramConfig(env: TelegramEnv): {
     throw new Error("尚未設定 TELEGRAM_BOT_TOKEN，請在 .env 填入 BotFather 給的 token");
   }
 
-  const targets = parseChatTargets(env.TELEGRAM_CHAT_IDS);
   if (targets.length === 0) {
-    throw new Error("尚未設定 TELEGRAM_CHAT_IDS，請在 .env 填入至少一個 chat ID");
+    throw new Error("尚未設定 Telegram 收件人，請用 npm run recipients -- add chatId 標籤 新增");
   }
 
-  return { token, targets };
+  return { token, targets: [...targets] };
 }
 
 const taipeiDateFormatter = new Intl.DateTimeFormat("en-CA", {

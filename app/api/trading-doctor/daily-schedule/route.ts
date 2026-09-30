@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withSql } from "../../../../lib/auth-db";
 import { collectReportInput } from "../../../../lib/chip-report";
 import {
   DAILY_DATA_JOB_LABELS,
@@ -25,6 +26,7 @@ import {
   readTelegramConfig,
   type TelegramEnv,
 } from "../../../../lib/telegram";
+import { listTelegramRecipients } from "../../../../lib/telegram-db";
 import { getLatestBfi82u } from "../../../../lib/twse";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +36,13 @@ async function telegramEnv(): Promise<TelegramEnv> {
   return env as unknown as TelegramEnv;
 }
 
+/** 收件人每次都從 Postgres 重讀，改完不必重啟。 */
+async function telegramConfig(env: TelegramEnv) {
+  return readTelegramConfig(env, await withSql(env.DATABASE_URL, listTelegramRecipients));
+}
+
 async function broadcast(message: string): Promise<boolean> {
-  const { token, targets } = readTelegramConfig(await telegramEnv());
+  const { token, targets } = await telegramConfig(await telegramEnv());
   const results = await broadcastTelegramMessage(token, targets, message);
   return results.some((result) => result.ok);
 }
