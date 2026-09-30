@@ -31,7 +31,7 @@ export interface AuthUserRow {
 type Sql = postgres.Sql;
 
 export async function withSql<T>(databaseUrl: string | undefined, run: (sql: Sql) => Promise<T>): Promise<T> {
-  if (!databaseUrl?.trim()) throw new Error("尚未設定 DATABASE_URL，無法讀取登入帳號");
+  if (!databaseUrl?.trim()) throw new Error("尚未設定 DATABASE_URL，無法連線 Postgres");
   const sql = postgres(databaseUrl, { max: 1, connect_timeout: 10, idle_timeout: 5, onnotice: () => {} });
   try {
     return await run(sql);

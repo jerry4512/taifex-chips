@@ -11,7 +11,8 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "users": "node --env-file-if-exists=.env scripts/users.mjs"
+    "users": "node --env-file-if-exists=.env scripts/users.mjs",
+    "recipients": "node --env-file-if-exists=.env scripts/recipients.mjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.3",

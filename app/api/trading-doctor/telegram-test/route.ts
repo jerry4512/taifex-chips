@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withSql } from "../../../../lib/auth-db";
 import { collectReportInput } from "../../../../lib/chip-report";
 import {
   broadcastTelegramMessage,
@@ -8,6 +9,7 @@ import {
   type TelegramDeliveryResult,
   type TelegramEnv,
 } from "../../../../lib/telegram";
+import { listTelegramRecipients } from "../../../../lib/telegram-db";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +33,17 @@ async function telegramEnv(): Promise<TelegramEnv> {
   return env as unknown as TelegramEnv;
 }
 
+/** 收件人每次都從 Postgres 重讀，改完不必重啟。 */
+async function telegramConfig(env: TelegramEnv) {
+  return readTelegramConfig(env, await withSql(env.DATABASE_URL, listTelegramRecipients));
+}
+
 export async function GET() {
   const env = await telegramEnv();
   const botTokenPresent = Boolean(env.TELEGRAM_BOT_TOKEN?.trim());
 
   try {
-    const { targets } = readTelegramConfig(env);
+    const { targets } = await telegramConfig(env);
     return NextResponse.json<TelegramStatusResponse>(
       { configured: true, botTokenPresent, chats: targets },
       { headers: { "Cache-Control": "no-store" } },
@@ -55,7 +62,7 @@ export async function POST() {
   let targets: TelegramChatTarget[];
 
   try {
-    ({ token, targets } = readTelegramConfig(await telegramEnv()));
+    ({ token, targets } = await telegramConfig(await telegramEnv()));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Telegram 設定無法讀取";
     return NextResponse.json({ error: message }, { status: 400 });

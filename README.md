@@ -119,26 +119,39 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 
 ## Telegram 推播
 
-設定寫在 `.env`（已被 `.gitignore` 忽略），範本見 `.env.example`，內含取得 token 與 chat ID 的逐步說明。
+Bot token 寫在 `.env`（已被 `.gitignore` 忽略），範本見 `.env.example`，內含取得 token 與 chat ID 的逐步說明。收件人存在 `DATABASE_URL` 指向的 Postgres（與登入帳號同一個資料庫，`lib/telegram-db.ts`），用指令管理：
 
 ```bash
 TELEGRAM_BOT_TOKEN=8123456789:AAFk...
-TELEGRAM_CHAT_IDS=我:123456789,Jimmy:987654321
+
+npm run recipients -- add 123456789 我          # 新增收件人，或幫既有 chatId 改標籤
+npm run recipients -- add -1001234567890 交易群
+npm run recipients -- remove 123456789          # 刪除收件人
+npm run recipients -- list                      # 列出收件人
 ```
 
-`TELEGRAM_CHAT_IDS` 以逗號（或換行）分隔多位收件人，每筆可寫成 `標籤:chatId` 或只寫 `chatId`。標籤只作顯示用，會出現在畫面與傳送結果上。個人 chat ID 為正數、群組為負數、公開頻道可用 `@username`。
+標籤只作顯示用，會出現在畫面與傳送結果上，省略時以 chatId 顯示。個人 chat ID 為正數、群組為負數、公開頻道可用 `@username`。收件人每次推播都從資料庫重讀，改完不用重開伺服器。
+
+`telegram_recipients`：
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `chat_id` | `TEXT PRIMARY KEY` | Telegram chat ID 或 `@username` |
+| `label` | `TEXT` | 顯示用標籤 |
+| `created_at`／`updated_at` | `TIMESTAMPTZ` | 新增／最後改標籤時間；推播依新增順序 |
+
+資料表由 `npm run recipients` 第一次執行時建立；網站讀取時表還不存在就視同沒有收件人。
 
 三個常見地雷：
 
-1. **`.env` 只在啟動時讀取**，改完要重開 `npm run dev`
-2. `.env.example` 說明區塊裡的範例行開頭有 `#`，是註解，改那裡不會生效 —— 要改檔案最下方沒有 `#` 的那兩行
+1. **`.env` 只在啟動時讀取**，改 token 後要重開 `npm run dev`（收件人不受影響）
+2. `.env.example` 說明區塊裡的範例行開頭有 `#`，是註解，改那裡不會生效 —— 要改檔案下方沒有 `#` 的那一行
 3. 收件人必須**先主動對 bot 說過話**，否則 Telegram 會回 `chat not found`
 
-正式部署時 `.env` 不會被帶上去，改用 secret：
+正式部署時 `.env` 不會被帶上去，改用 secret（`DATABASE_URL` 見下方「登入」）：
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_CHAT_IDS
 ```
 
 推播內容（`lib/telegram.ts` 的 `buildChipReport`）：
@@ -218,7 +231,7 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_IDS`、`DATABASE_URL` 三個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
+- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`DATABASE_URL` 兩個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
 - **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
 - **改程式後**：要加 `--build` 重建映像。
 

@@ -4,7 +4,7 @@ import {
   broadcastTelegramMessage,
   buildChipReport,
   buildMissingDataNotice,
-  parseChatTargets,
+  isValidChatId,
   readTelegramConfig,
 } from "../lib/telegram.ts";
 
@@ -19,46 +19,26 @@ const spot = {
 };
 const futures = { date: "2026-09-24", pureDayChange: 85, interpretation: "偏多" };
 
-test("parses labelled, bare, group and channel chat targets", () => {
-  assert.deepEqual(
-    parseChatTargets("我的手機:123456789, 交易群:-1001234567890 ,987654321,@my_channel"),
-    [
-      { label: "我的手機", chatId: "123456789" },
-      { label: "交易群", chatId: "-1001234567890" },
-      { label: "987654321", chatId: "987654321" },
-      { label: "@my_channel", chatId: "@my_channel" },
-    ],
-  );
-});
-
-test("accepts newlines and skips blanks and comments", () => {
-  assert.deepEqual(parseChatTargets("\n# 主要\n手機:1\n\n,平板:2\n"), [
-    { label: "手機", chatId: "1" },
-    { label: "平板", chatId: "2" },
-  ]);
-});
-
-test("drops duplicate chat ids and keeps the first label", () => {
-  assert.deepEqual(parseChatTargets("手機:1,備援:1"), [{ label: "手機", chatId: "1" }]);
-});
-
-test("rejects malformed entries with the offending text", () => {
-  assert.throws(() => parseChatTargets("手機:abc,2"), /TELEGRAM_CHAT_IDS 格式錯誤：手機:abc/);
-});
-
-test("reports which environment variable is still missing", () => {
+test("reports whether the token or the recipients are still missing", () => {
+  const targets = [{ label: "手機", chatId: "1" }];
+  assert.throws(() => readTelegramConfig({}, targets), /TELEGRAM_BOT_TOKEN/);
   assert.throws(
-    () => readTelegramConfig({ TELEGRAM_CHAT_IDS: "1" }),
-    /TELEGRAM_BOT_TOKEN/,
+    () => readTelegramConfig({ TELEGRAM_BOT_TOKEN: "  token  " }, []),
+    /尚未設定 Telegram 收件人.*npm run recipients/,
   );
-  assert.throws(
-    () => readTelegramConfig({ TELEGRAM_BOT_TOKEN: "  token  " }),
-    /TELEGRAM_CHAT_IDS/,
-  );
-  assert.deepEqual(readTelegramConfig({ TELEGRAM_BOT_TOKEN: " t ", TELEGRAM_CHAT_IDS: "手機:1" }), {
+  assert.deepEqual(readTelegramConfig({ TELEGRAM_BOT_TOKEN: " t " }, targets), {
     token: "t",
-    targets: [{ label: "手機", chatId: "1" }],
+    targets,
   });
+});
+
+test("validates chat ids for people, groups and public channels", () => {
+  for (const chatId of ["123456789", "-1001234567890", "@my_channel"]) {
+    assert.equal(isValidChatId(chatId), true, chatId);
+  }
+  for (const chatId of ["", "abc", "12a", "@ab", "我:1"]) {
+    assert.equal(isValidChatId(chatId), false, chatId);
+  }
 });
 
 test("sends one message per chat and isolates failures", async () => {

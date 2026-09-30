@@ -103,9 +103,8 @@ test("documents the Telegram environment variables without committing secrets", 
   ]);
 
   assert.match(example, /^TELEGRAM_BOT_TOKEN=$/m);
-  assert.match(example, /^TELEGRAM_CHAT_IDS=$/m);
   assert.match(gitignore, /^\.env\*$/m);
   assert.match(gitignore, /^!\.env\.example$/m);
   assert.match(envTypes, /TELEGRAM_BOT_TOKEN\?: string;/);
-  assert.match(envTypes, /TELEGRAM_CHAT_IDS\?: string;/);
+  assert.doesNotMatch(envTypes, /TELEGRAM_CHAT_IDS/);
 });
