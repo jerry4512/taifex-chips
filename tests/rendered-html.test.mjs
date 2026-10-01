@@ -92,7 +92,8 @@ test("offers a date-specific database acquisition flow", async () => {
   assert.match(afterHoursRoute, /export async function GET/);
   assert.match(afterHoursRoute, /export async function POST/);
   assert.match(afterHoursRoute, /futContractsDateAh|TAIFEX_AFTER_HOURS_SOURCE/);
-  assert.equal(JSON.parse(hosting).d1, "DB");
+  // 籌碼資料改存 Postgres（DATABASE_URL），不再綁定 D1。
+  assert.equal(JSON.parse(hosting).d1, null);
 });
 
 test("documents the Telegram environment variables without committing secrets", async () => {
