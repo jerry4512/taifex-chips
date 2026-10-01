@@ -35,6 +35,10 @@ test("server renders the futures positioning page", async () => {
   assert.match(html, /開盤預估約當淨 OI/);
   assert.match(html, /夜盤約當買賣超/);
   assert.match(html, /2026\/09\/21 因缺少前一交易日基準/);
+  // 開啟頁面會自動讀資料庫，伺服器端先渲染成載入中，而不是「沒有資料」。
+  assert.match(html, /正在讀取資料庫的證交所資料/);
+  assert.match(html, /正在讀取資料庫的夜盤資料/);
+  assert.match(html, /正在讀取資料庫的日盤資料/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
   assert.match(html, /action="\/api\/auth\/logout"/);
 });

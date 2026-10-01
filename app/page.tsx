@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ChipInterpretation,
   TaifexAfterHoursResponse,
@@ -178,19 +178,33 @@ function SpotFlowCard({ flow }: { flow: TwseInstitutionFlow }) {
   );
 }
 
+function errorText(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback;
+}
+
+/** 讀只查資料庫的 GET API；404 代表資料庫還沒有資料，回傳 null 讓畫面顯示空白提示而不是錯誤。 */
+async function readDatabase<T>(url: string, fallbackError: string): Promise<T | null> {
+  const response = await fetch(url, { cache: "no-store" });
+  if (response.status === 404) return null;
+  const payload = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? fallbackError);
+  return payload;
+}
+
 export default function Home() {
   const [spotReport, setSpotReport] = useState<TwseBfi82uResponse | null>(null);
   const [spotError, setSpotError] = useState<string | null>(null);
-  const [spotLoading, setSpotLoading] = useState(false);
+  const [spotLoading, setSpotLoading] = useState(true);
+  const [spotSaving, setSpotSaving] = useState(false);
   const [report, setReport] = useState<TaifexFuturesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState(taipeiToday);
   const [notice, setNotice] = useState<string | null>(null);
   const [nightReport, setNightReport] = useState<TaifexAfterHoursResponse | null>(null);
   const [nightError, setNightError] = useState<string | null>(null);
-  const [nightLoading, setNightLoading] = useState(false);
+  const [nightLoading, setNightLoading] = useState(true);
   const [nightSaving, setNightSaving] = useState(false);
   const [nightDate, setNightDate] = useState(taipeiToday);
   const [nightNotice, setNightNotice] = useState<string | null>(null);
@@ -199,37 +213,49 @@ export default function Home() {
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [telegramSending, setTelegramSending] = useState(false);
 
-  const loadSpotReport = useCallback(async () => {
-    setSpotLoading(true);
-    setSpotError(null);
+  // 讀取函式只在 Promise 回呼裡更新狀態，才能直接在開啟頁面的 effect 裡呼叫。
+  const loadSpotReport = useCallback(
+    () =>
+      readDatabase<TwseBfi82uResponse>("/api/trading-doctor/bfi82u", "無法讀取證交所資料")
+        .then(
+          (payload) => {
+            setSpotReport(payload);
+            setSpotError(null);
+          },
+          (reason: unknown) => setSpotError(errorText(reason, "無法讀取證交所資料")),
+        )
+        .finally(() => setSpotLoading(false)),
+    [],
+  );
+
+  const acquireSpotReport = useCallback(async () => {
+    setSpotSaving(true);
     try {
       const response = await fetch("/api/trading-doctor/bfi82u", { method: "POST" });
       const payload = (await response.json()) as TwseBfi82uResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "無法取得證交所資料");
       setSpotReport(payload);
+      setSpotError(null);
     } catch (reason) {
-      setSpotError(reason instanceof Error ? reason.message : "無法取得證交所資料");
+      window.alert(reason instanceof Error ? reason.message : "無法取得證交所資料");
     } finally {
-      setSpotLoading(false);
+      setSpotSaving(false);
     }
   }, []);
 
-  const loadReport = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/trading-doctor/taifex-futures", {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as TaifexFuturesResponse & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "無法取得期交所資料");
-      setReport(payload);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "無法取得期交所資料");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadReport = useCallback(
+    () =>
+      readDatabase<TaifexFuturesResponse>("/api/trading-doctor/taifex-futures", "無法取得期交所資料")
+        .then(
+          (payload) => {
+            setReport(payload);
+            setError(null);
+          },
+          (reason: unknown) => setError(errorText(reason, "無法取得期交所資料")),
+        )
+        .finally(() => setLoading(false)),
+    [],
+  );
 
   const loadTelegramStatus = useCallback(async () => {
     try {
@@ -263,24 +289,22 @@ export default function Home() {
     }
   }, [loadTelegramStatus]);
 
-  const loadNightReport = useCallback(async () => {
-    setNightLoading(true);
-    setNightError(null);
-    try {
-      const response = await fetch("/api/trading-doctor/taifex-futures-after-hours", {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as TaifexAfterHoursResponse & {
-        error?: string;
-      };
-      if (!response.ok) throw new Error(payload.error ?? "無法取得期交所夜盤資料");
-      setNightReport(payload);
-    } catch (reason) {
-      setNightError(reason instanceof Error ? reason.message : "無法取得期交所夜盤資料");
-    } finally {
-      setNightLoading(false);
-    }
-  }, []);
+  const loadNightReport = useCallback(
+    () =>
+      readDatabase<TaifexAfterHoursResponse>(
+        "/api/trading-doctor/taifex-futures-after-hours",
+        "無法取得期交所夜盤資料",
+      )
+        .then(
+          (payload) => {
+            setNightReport(payload);
+            setNightError(null);
+          },
+          (reason: unknown) => setNightError(errorText(reason, "無法取得期交所夜盤資料")),
+        )
+        .finally(() => setNightLoading(false)),
+    [],
+  );
 
   const acquireNightDate = useCallback(async () => {
     setNightSaving(true);
@@ -329,6 +353,29 @@ export default function Home() {
       setSaving(false);
     }
   }, [selectedDate]);
+
+  const retrySpotReport = () => {
+    setSpotLoading(true);
+    setSpotError(null);
+    void loadSpotReport();
+  };
+  const retryNightReport = () => {
+    setNightLoading(true);
+    setNightError(null);
+    void loadNightReport();
+  };
+  const retryReport = () => {
+    setLoading(true);
+    setError(null);
+    void loadReport();
+  };
+
+  // 開啟頁面只讀 Postgres（GET），不連期交所／證交所；要抓新資料仍需按各區塊的按鈕。
+  useEffect(() => {
+    void loadSpotReport();
+    void loadNightReport();
+    void loadReport();
+  }, [loadNightReport, loadReport, loadSpotReport]);
 
   const latest = report?.data.at(-1) ?? null;
   const latestNight = nightReport?.data.at(-1) ?? null;
@@ -425,8 +472,8 @@ export default function Home() {
             <span>資料日期</span>
             <strong>{spotReport ? formatDate(spotReport.date) : "—"}</strong>
             <small>單位：億元</small>
-            <button type="button" onClick={() => void loadSpotReport()} disabled={spotLoading}>
-              {spotLoading ? "取得中…" : "取得證交所資料"}
+            <button type="button" onClick={() => void acquireSpotReport()} disabled={spotSaving}>
+              {spotSaving ? "取得中…" : "取得證交所資料"}
             </button>
           </div>
         </div>
@@ -434,12 +481,12 @@ export default function Home() {
         {spotError ? (
           <div className="spot-state error-message" role="alert">
             <span>{spotError}</span>
-            <button type="button" onClick={() => void loadSpotReport()}>再試一次</button>
+            <button type="button" onClick={retrySpotReport}>再試一次</button>
           </div>
         ) : spotLoading && !spotReport ? (
           <div className="spot-state" role="status">
             <span className="loading-line" />
-            <span>正在取得證交所最新資料…</span>
+            <span>正在讀取資料庫的證交所資料…</span>
           </div>
         ) : spotReport ? (
           <div className="spot-grid">
@@ -447,7 +494,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="spot-state" role="status">
-            <span>請按「取得證交所資料」載入最新一天的買賣金額。</span>
+            <span>資料庫目前沒有證交所資料，請按「取得證交所資料」抓取最新一天的買賣金額。</span>
           </div>
         )}
       </section>
@@ -532,14 +579,14 @@ export default function Home() {
           <div className="state-message error-message" role="alert">
             <strong>夜盤資料暫時無法載入</strong>
             <span>{nightError}</span>
-            <button type="button" onClick={() => void loadNightReport()}>
+            <button type="button" onClick={retryNightReport}>
               再試一次
             </button>
           </div>
         ) : nightLoading && !nightReport ? (
           <div className="state-message" role="status">
             <span className="loading-line" />
-            <span>正在整理期交所夜盤資料…</span>
+            <span>正在讀取資料庫的夜盤資料…</span>
           </div>
         ) : nightReport && nightReport.data.length > 0 ? (
           <div className="table-scroll">
@@ -564,8 +611,8 @@ export default function Home() {
           </div>
         ) : (
           <div className="state-message" role="status">
-            <strong>尚未顯示夜盤資料</strong>
-            <span>請選擇日期後按「取得夜盤資料」，會一併列出資料庫已存的所有日期。</span>
+            <strong>資料庫目前沒有夜盤資料</strong>
+            <span>請選擇日期後按「取得夜盤資料」。</span>
           </div>
         )}
 
@@ -661,14 +708,14 @@ export default function Home() {
           <div className="state-message error-message" role="alert">
             <strong>資料暫時無法載入</strong>
             <span>{error}</span>
-            <button type="button" onClick={() => void loadReport()}>
+            <button type="button" onClick={retryReport}>
               再試一次
             </button>
           </div>
         ) : loading && !report ? (
           <div className="state-message" role="status">
             <span className="loading-line" />
-            <span>正在整理期交所資料…</span>
+            <span>正在讀取資料庫的日盤資料…</span>
           </div>
         ) : report && report.data.length > 0 ? (
           <div className="table-scroll">
@@ -694,8 +741,8 @@ export default function Home() {
           </div>
         ) : (
           <div className="state-message" role="status">
-            <strong>尚未顯示資料</strong>
-            <span>請選擇日期後按「取得資料」，會一併列出資料庫已存的所有日期。</span>
+            <strong>資料庫目前沒有資料</strong>
+            <span>請選擇日期後按「取得資料」。</span>
           </div>
         )}
 
