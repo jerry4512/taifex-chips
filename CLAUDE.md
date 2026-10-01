@@ -38,7 +38,7 @@ node --test --test-name-pattern="full-day" tests/taifex.test.mjs
   - `lib/taifex.ts`：抓期交所 HTML（`futContractsDate` 全日、`futContractsDateAh` 夜盤）、解析外資淨口數、純函式計算（`equivalentTxContracts`、`excelRound`、`estimateOpenEquivalentNetOi`、`interpretChipChange`）、台北時區日期工具。
   - `lib/twse.ts`：證交所 BFI82U JSON 解析（`parseBfi82uRaw` 取原始列存資料庫、`combineBfi82u` 合併成四類法人）。
   - `lib/futures-db.ts`：期交所籌碼與證交所現貨原始金額存 Postgres（`DATABASE_URL`，經 `lib/auth-db.ts` 的 `withSql`），並在讀取時算出所有衍生欄位。
-  - `lib/auth.ts`：帳號密碼登入的純函式（PBKDF2 雜湊、HMAC 簽 cookie）；`lib/auth-db.ts`：帳號（`auth_users`）與 cookie 簽章金鑰（`auth_settings`，自動產生、記憶體暫存 5 分鐘）存在 Postgres（`DATABASE_URL`，postgres.js），用 `npm run users` 管理。`worker/index.ts` 匯出 `createWorker({ loadSecret })` 讓 SSR 測試注入假金鑰。`worker/index.ts` 在交給 vinext 前呼叫 `gateRequest` 擋下未登入請求，只有 `/login`、`/api/auth/*` 與靜態檔公開。
+  - `lib/auth.ts`：帳號密碼登入的純函式（PBKDF2 雜湊、HMAC 簽 cookie）；`lib/auth-db.ts`：帳號（`auth_users`）與 cookie 簽章金鑰（`auth_settings`，自動產生、記憶體暫存 5 分鐘）存在 Postgres（`DATABASE_URL`，postgres.js），用 `npm run users` 管理。`worker/index.ts` 匯出 `createWorker({ loadSecret })` 讓 SSR 測試注入假金鑰。`worker/index.ts` 在交給 vinext 前呼叫 `gateRequest` 擋下未登入請求，只有 `/login`、所有 `/api/*` 與靜態檔公開。
   - `lib/telegram.ts`：chat ID 驗證、組報告文字、廣播；`lib/telegram-db.ts`：收件人（`telegram_recipients`）存在同一個 Postgres，用 `npm run recipients` 管理。
   - `app/api/trading-doctor/*/route.ts`：薄薄一層，`GET` 只讀資料庫不連外，`POST {"date"}` 才去期交所抓並寫入。
   - `app/page.tsx`：單一 client component 儀表板，透過上述 API 操作。
