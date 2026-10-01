@@ -11,6 +11,8 @@ import type {
   TaifexAfterHoursRow,
   TaifexFuturesRow,
 } from "./taifex";
+import type { TwseBfi82uRaw, TwseBfi82uResponse } from "./twse";
+import { combineBfi82u } from "./twse";
 import {
   equivalentTxContracts,
   estimateOpenEquivalentNetOi,
@@ -115,6 +117,15 @@ export const FUTURES_TABLES_SQL = [
     tmf_night_net INTEGER NOT NULL,
     collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS twse_institutional_flows (
+    date TEXT NOT NULL,
+    item TEXT NOT NULL,
+    buy BIGINT NOT NULL,
+    sell BIGINT NOT NULL,
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (date, item)
   )`,
   `CREATE TABLE IF NOT EXISTS daily_schedule_jobs (
     date TEXT NOT NULL,
@@ -342,14 +353,51 @@ export async function listNightlyPositions(): Promise<TaifexAfterHoursRow[]> {
   });
 }
 
-/** 夜盤、日盤看原始資料表有沒有當天那列；其餘看排程完成紀錄。 */
+/** 證交所每列原始金額整批寫入；重抓同一天即覆蓋更正，collected_at 保留首次寫入時間。 */
+export async function saveTwseInstitutionalFlows(raw: TwseBfi82uRaw): Promise<void> {
+  const rows = raw.rows.map((row) => ({ date: raw.date, item: row.item, buy: row.buy, sell: row.sell }));
+  await withDatabase(
+    (sql) => sql`
+      INSERT INTO twse_institutional_flows ${sql(rows, "date", "item", "buy", "sell")}
+      ON CONFLICT (date, item) DO UPDATE SET
+        buy = EXCLUDED.buy,
+        sell = EXCLUDED.sell,
+        updated_at = now()
+    `,
+  );
+}
+
+/** 讀最新一個交易日並合併成四類法人；還沒存過任何一天時回傳 null。 */
+export async function latestTwseInstitutionalFlows(): Promise<TwseBfi82uResponse | null> {
+  // BIGINT 由 postgres.js 以字串回傳；金額遠小於 2^53，轉回 number 不失真。
+  const stored = await withDatabase(
+    (sql) => sql<{ date: string; item: string; buy: string; sell: string }[]>`
+      SELECT date, item, buy, sell
+      FROM twse_institutional_flows
+      WHERE date = (SELECT max(date) FROM twse_institutional_flows)
+    `,
+  );
+  if (stored.length === 0) return null;
+
+  return {
+    ...combineBfi82u({
+      date: stored[0].date,
+      rows: stored.map((row) => ({ item: row.item, buy: Number(row.buy), sell: Number(row.sell) })),
+    }),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/** 夜盤、日盤、證交所看原始資料表有沒有當天的資料；其餘看排程完成紀錄。 */
 export async function isDailyJobDone(date: string, job: DailyJob): Promise<boolean> {
   const rows = await withDatabase((sql) =>
     job === "night"
       ? sql`SELECT 1 FROM nightly_futures_positions WHERE date = ${date}`
       : job === "day"
         ? sql`SELECT 1 FROM daily_futures_positions WHERE date = ${date}`
-        : sql`SELECT 1 FROM daily_schedule_jobs WHERE date = ${date} AND job = ${job}`,
+        : job === "spot"
+          ? sql`SELECT 1 FROM twse_institutional_flows WHERE date = ${date} LIMIT 1`
+          : sql`SELECT 1 FROM daily_schedule_jobs WHERE date = ${date} AND job = ${job}`,
   );
   return rows.length > 0;
 }

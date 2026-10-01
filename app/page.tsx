@@ -203,7 +203,7 @@ export default function Home() {
     setSpotLoading(true);
     setSpotError(null);
     try {
-      const response = await fetch("/api/trading-doctor/bfi82u", { cache: "no-store" });
+      const response = await fetch("/api/trading-doctor/bfi82u", { method: "POST" });
       const payload = (await response.json()) as TwseBfi82uResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "無法取得證交所資料");
       setSpotReport(payload);

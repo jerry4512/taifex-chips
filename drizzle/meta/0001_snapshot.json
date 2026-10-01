@@ -1,0 +1,226 @@
+{
+  "id": "c1af4d0f-d165-4872-afdf-113223616406",
+  "prevId": "ae2e144a-24f4-42fb-b5ff-ba342757fdd7",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.daily_futures_positions": {
+      "name": "daily_futures_positions",
+      "schema": "",
+      "columns": {
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tx_net_open_interest": {
+          "name": "tx_net_open_interest",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mtx_net_open_interest": {
+          "name": "mtx_net_open_interest",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tmf_net_open_interest": {
+          "name": "tmf_net_open_interest",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "night_equivalent_net": {
+          "name": "night_equivalent_net",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.daily_schedule_jobs": {
+      "name": "daily_schedule_jobs",
+      "schema": "",
+      "columns": {
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "job": {
+          "name": "job",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "daily_schedule_jobs_date_job_pk": {
+          "name": "daily_schedule_jobs_date_job_pk",
+          "columns": [
+            "date",
+            "job"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.nightly_futures_positions": {
+      "name": "nightly_futures_positions",
+      "schema": "",
+      "columns": {
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tx_night_net": {
+          "name": "tx_night_net",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mtx_night_net": {
+          "name": "mtx_night_net",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tmf_night_net": {
+          "name": "tmf_night_net",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.twse_institutional_flows": {
+      "name": "twse_institutional_flows",
+      "schema": "",
+      "columns": {
+        "date": {
+          "name": "date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item": {
+          "name": "item",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "buy": {
+          "name": "buy",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sell": {
+          "name": "sell",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "twse_institutional_flows_date_item_pk": {
+          "name": "twse_institutional_flows_date_item_pk",
+          "columns": [
+            "date",
+            "item"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

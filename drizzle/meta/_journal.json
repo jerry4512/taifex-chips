@@ -8,6 +8,13 @@
       "when": 1790821197378,
       "tag": "0000_futures_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790821923983,
+      "tag": "0001_twse_institutional_flows",
+      "breakpoints": true
     }
   ]
 }
