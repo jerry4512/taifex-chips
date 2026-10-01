@@ -140,10 +140,21 @@ const UNDEFINED_TABLE = "42P01";
 
 type Sql = postgres.Sql;
 
+async function tableExists(sql: Sql, table: string): Promise<boolean> {
+  const rows = await sql<{ exists: boolean }[]>`SELECT to_regclass(${table}) IS NOT NULL AS exists`;
+  return rows[0].exists;
+}
+
+/**
+ * 種子資料只灌進這次新建的表：任一張表缺少都會走到這裡，
+ * 不能把用 `npm run data -- clear` 清空過的日盤／夜盤又灌回去。
+ */
 async function createSchema(sql: Sql): Promise<void> {
+  const seedDaily = !(await tableExists(sql, "daily_futures_positions"));
+  const seedNightly = !(await tableExists(sql, "nightly_futures_positions"));
   for (const statement of FUTURES_TABLES_SQL) await sql.unsafe(statement);
 
-  for (const row of initialRows) {
+  for (const row of seedDaily ? initialRows : []) {
     await sql`
       INSERT INTO daily_futures_positions (
         date,
@@ -166,7 +177,7 @@ async function createSchema(sql: Sql): Promise<void> {
     `;
   }
 
-  for (const row of nightlyInitialRows) {
+  for (const row of seedNightly ? nightlyInitialRows : []) {
     await sql`
       INSERT INTO nightly_futures_positions (
         date,

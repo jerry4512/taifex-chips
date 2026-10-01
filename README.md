@@ -69,7 +69,23 @@ Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegr
 
 另有 `collected_at`、`updated_at`。
 
-### 查看資料
+### 查看與清空資料
+
+```bash
+npm run data -- list               # 各表的日期數與日期範圍
+npm run data -- clear spot         # 清空證交所三大法人
+npm run data -- clear night        # 清空期交所夜盤
+npm run data -- clear day          # 清空期交所日盤
+npm run data -- clear night,day    # 逗號分隔一次清多張
+npm run data -- clear all          # 三張全部清空
+```
+
+- 清空前會列出連到哪個資料庫（只顯示主機，不印帳密）與要刪的日期範圍，**輸入 `yes` 才會刪**；加 `--yes` 可跳過確認，非互動環境沒加 `--yes` 會中止並回傳錯誤碼。
+- 多張表在同一個交易裡刪除，任一張失敗就全部不刪。只刪資料、保留資料表，所以網站**不會再灌回 09/21–09/24 的種子資料**；要恢復請在網頁上逐日按「取得資料」「取得夜盤資料」重抓（證交所只能取得最新一天）。
+- 排程完成紀錄 `daily_schedule_jobs` 不受影響：當天已推播過的報告不會因清空而重發，但缺的日盤／夜盤仍會在下一輪補抓。
+- `.env` 的 `DATABASE_URL` 若指向 Railway，清掉的就是正式資料，執行前先看清楚第一行顯示的資料庫位置。
+
+直接下 SQL：
 
 ```bash
 psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"

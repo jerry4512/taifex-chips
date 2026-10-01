@@ -15,6 +15,7 @@ npm run dev          # vinext dev（Vite + Cloudflare 外掛，資料庫為 `.en
 npm run build        # 輸出到 dist/
 npm test             # 先 build，再 node --test tests/*.test.mjs
 npm run lint         # eslint
+npm run data -- list | clear spot|night|day|all   # 查看／清空籌碼資料（會先要求輸入 yes）
 npx drizzle-kit generate   # 依 db/schema.ts 產生 drizzle/ 遷移
 ```
 
