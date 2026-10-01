@@ -33,7 +33,7 @@ export function createWorker({ loadSecret }: { loadSecret: (env: Env) => Promise
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
 
-      // 整站需登入：未登入的網頁導向 /login，API 回 401。
+      // 網頁需登入，未登入導向 /login；/api/* 不需登入。
       const blocked = await gateRequest(request, () => loadSecret(env));
       if (blocked) return blocked;
 

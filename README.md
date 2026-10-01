@@ -139,7 +139,7 @@ psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
 | `POST` | `/api/trading-doctor/daily-schedule` | 排程用：補抓今天還沒拿到的夜盤／日盤／證交所，到齊後推播（見下方「平日自動排程」） |
 
-除了登入／登出，所有頁面與 API 都要先登入：未登入時網頁會導向 `/login`，API 回 `401 {"error":"請先登入"}`。
+網頁需要先登入，未登入時會導向 `/login`；`/api/*` 不需登入，任何知道網址的人都能直接呼叫（包含會連外抓資料、寫資料庫與發 Telegram 推播的 `POST`）。
 
 兩個 `GET` 期貨端點都是直接讀資料庫，不會連外；要更新資料請用對應的 `POST`（畫面上的「取得夜盤資料」與「取得資料」按鈕）。日期不可早於 2026/09/21，也不可晚於台北當日。
 
@@ -227,7 +227,7 @@ npm run users -- logout-all   # 換簽章金鑰，所有人最晚 5 分鐘內需
 - 密碼以 PBKDF2-SHA256（100000 次，workerd 上限）加鹽雜湊，資料庫不存明碼。
 - 登入後發一個 30 天有效的 HMAC 簽章 cookie（`HttpOnly; SameSite=Lax`，https 下加 `Secure`）。之後每個請求只驗簽章、不查帳號；簽章金鑰讀到後在記憶體暫存 5 分鐘，所以平常只有登入時才會連 Postgres。
 - **刪除帳號只會擋下之後的登入**，已登入的裝置要等 cookie 到期；要踢掉所有人請用 `npm run users -- logout-all`，最晚 5 分鐘（金鑰暫存時間）生效。
-- `DATABASE_URL` 沒設時一律擋下；Postgres 連不上且金鑰不在暫存時，網頁導向登入頁並顯示「無法連線帳號資料庫」、API 回 503，不會因此變成公開。
+- `DATABASE_URL` 沒設時一律擋下；Postgres 連不上且金鑰不在暫存時，網頁導向登入頁並顯示「無法連線帳號資料庫」，不會因此變成公開。
 - 目前沒有登入失敗次數限制，請使用夠長的密碼（工具要求至少 8 字元）。
 
 正式部署：
@@ -273,7 +273,7 @@ docker compose down            # 停止（資料保留）
 - **三項到齊**：推播一次籌碼報告（與「傳送籌碼報告」按鈕同一份）。至少一位收件人成功就算完成；全部失敗則下一輪重試。
 - **18:00 仍未到齊**（例如休市日）：推播一則「截至 18:00 仍未取得：…」通知，當天不再重試。
 - 報告、補抓、缺漏通知的完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
-- 看執行紀錄：`docker compose logs -f scheduler`（略過的輪次不寫紀錄）。
+- 看執行紀錄：每一步的明細（各項資料取得／尚未公布／失敗、補抓結果、推播成功與否、每位收件人的傳送結果）寫在主服務，用 `docker compose logs -f taifex-chips | grep 排程`；`docker compose logs -f scheduler` 則是每輪呼叫 API 的回應摘要。兩邊都不寫略過的輪次（週末、14:50 前、當天已完成）。
 
 ## 驗證
 

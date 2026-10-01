@@ -143,20 +143,19 @@ export function safeNextPath(next: string | null | undefined): string {
 
 const PUBLIC_PATHS = new Set(["/login", "/api/auth/login", "/api/auth/logout", "/favicon.svg", "/og.png", "/og-dark.png"]);
 
-/** 登入頁本身與它需要的靜態檔不擋，其他一律要登入。 */
+/** 登入頁本身、它需要的靜態檔與所有 API 不擋，其他網頁一律要登入。 */
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/assets/");
+  return PUBLIC_PATHS.has(pathname) || pathname.startsWith("/assets/") || pathname.startsWith("/api/");
 }
 
 /**
- * Worker 入口呼叫：已登入或公開路徑回 null 放行；否則網頁導向 /login、API 回 401。
+ * Worker 入口呼叫：已登入或公開路徑（含所有 API）回 null 放行；否則導向 /login。
  * `loadSecret` 讀取簽章金鑰（正式環境從 Postgres），只有帶著 cookie 時才會呼叫；
- * 讀不到金鑰時一律擋下（fail closed），網頁導向 /login?error=db、API 回 503。
+ * 讀不到金鑰時一律擋下（fail closed），導向 /login?error=db。
  */
 export async function gateRequest(request: Request, loadSecret: () => Promise<string>): Promise<Response | null> {
   const url = new URL(request.url);
   if (isPublicPath(url.pathname)) return null;
-  const isApi = url.pathname.startsWith("/api/");
 
   const token = readCookie(request.headers.get("cookie"), SESSION_COOKIE);
   if (token) {
@@ -165,16 +164,11 @@ export async function gateRequest(request: Request, loadSecret: () => Promise<st
       secret = await loadSecret();
     } catch (error) {
       console.error("讀取登入金鑰失敗", error);
-      return isApi
-        ? Response.json({ error: "無法連線帳號資料庫" }, { status: 503, headers: { "Cache-Control": "no-store" } })
-        : redirectToLogin(url, "db");
+      return redirectToLogin(url, "db");
     }
     if (await verifySessionToken(token, secret)) return null;
   }
 
-  if (isApi) {
-    return Response.json({ error: "請先登入" }, { status: 401, headers: { "Cache-Control": "no-store" } });
-  }
   return redirectToLogin(url);
 }
 
