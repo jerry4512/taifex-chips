@@ -1,9 +1,18 @@
+/**
+ * 籌碼資料存在 Postgres（與登入帳號、Telegram 收件人同一個 DATABASE_URL）。
+ * Worker 不能跨請求共用 TCP 連線，每次呼叫都經 withSql 開一條、用完即關。
+ * 資料表不存在（全新資料庫）時才建表、灌入種子資料並重試，平常查詢不會多跑建表指令。
+ */
+import type postgres from "postgres";
+import { withSql } from "./auth-db";
 import type { DailyJob } from "./daily-schedule";
 import type {
   ForeignNetPositions,
   TaifexAfterHoursRow,
   TaifexFuturesRow,
 } from "./taifex";
+import type { TwseBfi82uRaw, TwseBfi82uResponse } from "./twse";
+import { combineBfi82u } from "./twse";
 import {
   equivalentTxContracts,
   estimateOpenEquivalentNetOi,
@@ -91,117 +100,63 @@ const nightlyInitialRows: Array<StoredNightlyPosition & { collected_at: string }
   },
 ];
 
-let databaseReady: Promise<D1Database> | null = null;
+export const FUTURES_TABLES_SQL = [
+  `CREATE TABLE IF NOT EXISTS daily_futures_positions (
+    date TEXT PRIMARY KEY,
+    tx_net_open_interest INTEGER NOT NULL,
+    mtx_net_open_interest INTEGER NOT NULL,
+    tmf_net_open_interest INTEGER NOT NULL,
+    night_equivalent_net INTEGER NOT NULL,
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS nightly_futures_positions (
+    date TEXT PRIMARY KEY,
+    tx_night_net INTEGER NOT NULL,
+    mtx_night_net INTEGER NOT NULL,
+    tmf_night_net INTEGER NOT NULL,
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS twse_institutional_flows (
+    date TEXT NOT NULL,
+    item TEXT NOT NULL,
+    buy BIGINT NOT NULL,
+    sell BIGINT NOT NULL,
+    collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (date, item)
+  )`,
+  `CREATE TABLE IF NOT EXISTS daily_schedule_jobs (
+    date TEXT NOT NULL,
+    job TEXT NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (date, job)
+  )`,
+];
 
-function initializeDatabase(): Promise<D1Database> {
-  databaseReady ??= createSchema().catch((error: unknown) => {
-    databaseReady = null;
-    throw error;
-  });
-  return databaseReady;
+/** Postgres 的 undefined_table 錯誤碼。 */
+const UNDEFINED_TABLE = "42P01";
+
+type Sql = postgres.Sql;
+
+async function tableExists(sql: Sql, table: string): Promise<boolean> {
+  const rows = await sql<{ exists: boolean }[]>`SELECT to_regclass(${table}) IS NOT NULL AS exists`;
+  return rows[0].exists;
 }
 
-async function createSchema(): Promise<D1Database> {
-  const { env } = await import("cloudflare:workers");
-  const database = env.DB;
-  await database
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS daily_futures_positions (
-        date text PRIMARY KEY NOT NULL,
-        tx_net_open_interest integer NOT NULL,
-        mtx_net_open_interest integer NOT NULL,
-        tmf_net_open_interest integer NOT NULL,
-        night_equivalent_net integer NOT NULL,
-        collected_at text NOT NULL,
-        updated_at text NOT NULL
-      )`,
-    )
-    .run();
+/**
+ * 種子資料只灌進這次新建的表：任一張表缺少都會走到這裡，
+ * 不能把用 `npm run data -- clear` 清空過的日盤／夜盤又灌回去。
+ */
+async function createSchema(sql: Sql): Promise<void> {
+  const seedDaily = !(await tableExists(sql, "daily_futures_positions"));
+  const seedNightly = !(await tableExists(sql, "nightly_futures_positions"));
+  for (const statement of FUTURES_TABLES_SQL) await sql.unsafe(statement);
 
-  await database.batch(
-    initialRows.map((row) =>
-      database
-        .prepare(
-          `INSERT OR IGNORE INTO daily_futures_positions (
-            date,
-            tx_net_open_interest,
-            mtx_net_open_interest,
-            tmf_net_open_interest,
-            night_equivalent_net,
-            collected_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          row.date,
-          row.tx_net_open_interest,
-          row.mtx_net_open_interest,
-          row.tmf_net_open_interest,
-          row.night_equivalent_net,
-          row.collected_at,
-          row.collected_at,
-        ),
-    ),
-  );
-
-  await database
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS nightly_futures_positions (
-        date text PRIMARY KEY NOT NULL,
-        tx_night_net integer NOT NULL,
-        mtx_night_net integer NOT NULL,
-        tmf_night_net integer NOT NULL,
-        collected_at text NOT NULL,
-        updated_at text NOT NULL
-      )`,
-    )
-    .run();
-
-  await database.batch(
-    nightlyInitialRows.map((row) =>
-      database
-        .prepare(
-          `INSERT OR IGNORE INTO nightly_futures_positions (
-            date,
-            tx_night_net,
-            mtx_night_net,
-            tmf_night_net,
-            collected_at,
-            updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          row.date,
-          row.tx_night_net,
-          row.mtx_night_net,
-          row.tmf_night_net,
-          row.collected_at,
-          row.collected_at,
-        ),
-    ),
-  );
-
-  await database
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS daily_schedule_jobs (
-        date text NOT NULL,
-        job text NOT NULL,
-        completed_at text NOT NULL,
-        PRIMARY KEY(date, job)
-      )`,
-    )
-    .run();
-
-  return database;
-}
-
-export async function saveFuturesPosition(row: TaifexFuturesRow): Promise<void> {
-  const database = await initializeDatabase();
-  const now = new Date().toISOString();
-
-  await database
-    .prepare(
-      `INSERT INTO daily_futures_positions (
+  for (const row of seedDaily ? initialRows : []) {
+    await sql`
+      INSERT INTO daily_futures_positions (
         date,
         tx_net_open_interest,
         mtx_net_open_interest,
@@ -209,43 +164,97 @@ export async function saveFuturesPosition(row: TaifexFuturesRow): Promise<void> 
         night_equivalent_net,
         collected_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(date) DO UPDATE SET
-        tx_net_open_interest = excluded.tx_net_open_interest,
-        mtx_net_open_interest = excluded.mtx_net_open_interest,
-        tmf_net_open_interest = excluded.tmf_net_open_interest,
-        night_equivalent_net = excluded.night_equivalent_net,
-        updated_at = excluded.updated_at`,
-    )
-    .bind(
-      row.date,
-      row.txNetOpenInterest,
-      row.mtxNetOpenInterest,
-      row.tmfNetOpenInterest,
-      row.nightEquivalentNet ?? 0,
-      now,
-      now,
-    )
-    .run();
+      ) VALUES (
+        ${row.date},
+        ${row.tx_net_open_interest},
+        ${row.mtx_net_open_interest},
+        ${row.tmf_net_open_interest},
+        ${row.night_equivalent_net},
+        ${row.collected_at},
+        ${row.collected_at}
+      )
+      ON CONFLICT (date) DO NOTHING
+    `;
+  }
+
+  for (const row of seedNightly ? nightlyInitialRows : []) {
+    await sql`
+      INSERT INTO nightly_futures_positions (
+        date,
+        tx_night_net,
+        mtx_night_net,
+        tmf_night_net,
+        collected_at,
+        updated_at
+      ) VALUES (
+        ${row.date},
+        ${row.tx_night_net},
+        ${row.mtx_night_net},
+        ${row.tmf_night_net},
+        ${row.collected_at},
+        ${row.collected_at}
+      )
+      ON CONFLICT (date) DO NOTHING
+    `;
+  }
 }
 
-export async function listFuturesPositions(): Promise<TaifexFuturesRow[]> {
-  const database = await initializeDatabase();
-  const result = await database
-    .prepare(
-      `SELECT
+/** 取得連線一律經過這裡：先直接查，遇到資料表不存在才建表並重試一次。 */
+async function withDatabase<T>(run: (sql: Sql) => Promise<T>): Promise<T> {
+  const { env } = await import("cloudflare:workers");
+  return withSql(env.DATABASE_URL, async (sql) => {
+    try {
+      return await run(sql);
+    } catch (error) {
+      if ((error as { code?: unknown } | null)?.code !== UNDEFINED_TABLE) throw error;
+      await createSchema(sql);
+      return run(sql);
+    }
+  });
+}
+
+export async function saveFuturesPosition(row: TaifexFuturesRow): Promise<void> {
+  await withDatabase(
+    (sql) => sql`
+      INSERT INTO daily_futures_positions (
         date,
         tx_net_open_interest,
         mtx_net_open_interest,
         tmf_net_open_interest,
         night_equivalent_net
-      FROM daily_futures_positions
-      ORDER BY date ASC`,
-    )
-    .all<StoredFuturesPosition>();
+      ) VALUES (
+        ${row.date},
+        ${row.txNetOpenInterest},
+        ${row.mtxNetOpenInterest},
+        ${row.tmfNetOpenInterest},
+        ${row.nightEquivalentNet ?? 0}
+      )
+      ON CONFLICT (date) DO UPDATE SET
+        tx_net_open_interest = EXCLUDED.tx_net_open_interest,
+        mtx_net_open_interest = EXCLUDED.mtx_net_open_interest,
+        tmf_net_open_interest = EXCLUDED.tmf_net_open_interest,
+        night_equivalent_net = EXCLUDED.night_equivalent_net,
+        updated_at = now()
+    `,
+  );
+}
 
+function selectFuturesPositions(sql: Sql) {
+  return sql<StoredFuturesPosition[]>`
+    SELECT
+      date,
+      tx_net_open_interest,
+      mtx_net_open_interest,
+      tmf_net_open_interest,
+      night_equivalent_net
+    FROM daily_futures_positions
+    ORDER BY date ASC
+  `;
+}
+
+function toFuturesRows(storedRows: readonly StoredFuturesPosition[]): TaifexFuturesRow[] {
   let previousOfficialOi: number | null = null;
-  return result.results.map((stored) => {
+  return storedRows.map((stored) => {
     const officialEquivalentNetOi = equivalentTxContracts({
       臺股期貨: stored.tx_net_open_interest,
       小型臺指期貨: stored.mtx_net_open_interest,
@@ -273,38 +282,34 @@ export async function listFuturesPositions(): Promise<TaifexFuturesRow[]> {
   });
 }
 
+export async function listFuturesPositions(): Promise<TaifexFuturesRow[]> {
+  return toFuturesRows(await withDatabase(selectFuturesPositions));
+}
+
 export async function saveNightlyPosition(
   date: string,
   positions: ForeignNetPositions,
 ): Promise<void> {
-  const database = await initializeDatabase();
-  const now = new Date().toISOString();
-
-  await database
-    .prepare(
-      `INSERT INTO nightly_futures_positions (
+  await withDatabase(
+    (sql) => sql`
+      INSERT INTO nightly_futures_positions (
         date,
         tx_night_net,
         mtx_night_net,
-        tmf_night_net,
-        collected_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(date) DO UPDATE SET
-        tx_night_net = excluded.tx_night_net,
-        mtx_night_net = excluded.mtx_night_net,
-        tmf_night_net = excluded.tmf_night_net,
-        updated_at = excluded.updated_at`,
-    )
-    .bind(
-      date,
-      positions.臺股期貨,
-      positions.小型臺指期貨,
-      positions.微型臺指期貨,
-      now,
-      now,
-    )
-    .run();
+        tmf_night_net
+      ) VALUES (
+        ${date},
+        ${positions.臺股期貨},
+        ${positions.小型臺指期貨},
+        ${positions.微型臺指期貨}
+      )
+      ON CONFLICT (date) DO UPDATE SET
+        tx_night_net = EXCLUDED.tx_night_net,
+        mtx_night_net = EXCLUDED.mtx_night_net,
+        tmf_night_net = EXCLUDED.tmf_night_net,
+        updated_at = now()
+    `,
+  );
 }
 
 /** 取交易日 date 之前最後一個已公布的官方約當淨 OI，作為開盤推估基準。 */
@@ -321,23 +326,22 @@ function baselineOfficialOi(
 }
 
 export async function listNightlyPositions(): Promise<TaifexAfterHoursRow[]> {
-  const database = await initializeDatabase();
-  const [dailyRows, stored] = await Promise.all([
-    listFuturesPositions(),
-    database
-      .prepare(
-        `SELECT
-          date,
-          tx_night_net,
-          mtx_night_net,
-          tmf_night_net
-        FROM nightly_futures_positions
-        ORDER BY date ASC`,
-      )
-      .all<StoredNightlyPosition>(),
-  ]);
+  // 同一條連線依序查兩張表，避免一次請求開兩條連線。
+  const [storedDaily, stored] = await withDatabase(async (sql) => [
+    await selectFuturesPositions(sql),
+    await sql<StoredNightlyPosition[]>`
+      SELECT
+        date,
+        tx_night_net,
+        mtx_night_net,
+        tmf_night_net
+      FROM nightly_futures_positions
+      ORDER BY date ASC
+    `,
+  ] as const);
+  const dailyRows = toFuturesRows(storedDaily);
 
-  return stored.results.map((row) => {
+  return stored.map((row) => {
     const nightEquivalentNet = equivalentTxContracts({
       臺股期貨: row.tx_night_net,
       小型臺指期貨: row.mtx_night_net,
@@ -360,27 +364,60 @@ export async function listNightlyPositions(): Promise<TaifexAfterHoursRow[]> {
   });
 }
 
-/** 夜盤、日盤看原始資料表有沒有當天那列；其餘看排程完成紀錄。 */
+/** 證交所每列原始金額整批寫入；重抓同一天即覆蓋更正，collected_at 保留首次寫入時間。 */
+export async function saveTwseInstitutionalFlows(raw: TwseBfi82uRaw): Promise<void> {
+  const rows = raw.rows.map((row) => ({ date: raw.date, item: row.item, buy: row.buy, sell: row.sell }));
+  await withDatabase(
+    (sql) => sql`
+      INSERT INTO twse_institutional_flows ${sql(rows, "date", "item", "buy", "sell")}
+      ON CONFLICT (date, item) DO UPDATE SET
+        buy = EXCLUDED.buy,
+        sell = EXCLUDED.sell,
+        updated_at = now()
+    `,
+  );
+}
+
+/** 讀最新一個交易日並合併成四類法人；還沒存過任何一天時回傳 null。 */
+export async function latestTwseInstitutionalFlows(): Promise<TwseBfi82uResponse | null> {
+  // BIGINT 由 postgres.js 以字串回傳；金額遠小於 2^53，轉回 number 不失真。
+  const stored = await withDatabase(
+    (sql) => sql<{ date: string; item: string; buy: string; sell: string }[]>`
+      SELECT date, item, buy, sell
+      FROM twse_institutional_flows
+      WHERE date = (SELECT max(date) FROM twse_institutional_flows)
+    `,
+  );
+  if (stored.length === 0) return null;
+
+  return {
+    ...combineBfi82u({
+      date: stored[0].date,
+      rows: stored.map((row) => ({ item: row.item, buy: Number(row.buy), sell: Number(row.sell) })),
+    }),
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+/** 夜盤、日盤、證交所看原始資料表有沒有當天的資料；其餘看排程完成紀錄。 */
 export async function isDailyJobDone(date: string, job: DailyJob): Promise<boolean> {
-  const database = await initializeDatabase();
-  const statement =
+  const rows = await withDatabase((sql) =>
     job === "night"
-      ? database.prepare("SELECT 1 FROM nightly_futures_positions WHERE date = ?").bind(date)
+      ? sql`SELECT 1 FROM nightly_futures_positions WHERE date = ${date}`
       : job === "day"
-        ? database.prepare("SELECT 1 FROM daily_futures_positions WHERE date = ?").bind(date)
-        : database
-            .prepare("SELECT 1 FROM daily_schedule_jobs WHERE date = ? AND job = ?")
-            .bind(date, job);
-  return (await statement.first()) !== null;
+        ? sql`SELECT 1 FROM daily_futures_positions WHERE date = ${date}`
+        : job === "spot"
+          ? sql`SELECT 1 FROM twse_institutional_flows WHERE date = ${date} LIMIT 1`
+          : sql`SELECT 1 FROM daily_schedule_jobs WHERE date = ${date} AND job = ${job}`,
+  );
+  return rows.length > 0;
 }
 
 export async function markDailyJobDone(date: string, job: DailyJob): Promise<void> {
-  const database = await initializeDatabase();
-  await database
-    .prepare(
-      `INSERT OR IGNORE INTO daily_schedule_jobs (date, job, completed_at)
-      VALUES (?, ?, ?)`,
-    )
-    .bind(date, job, new Date().toISOString())
-    .run();
+  await withDatabase(
+    (sql) => sql`
+      INSERT INTO daily_schedule_jobs (date, job) VALUES (${date}, ${job})
+      ON CONFLICT (date, job) DO NOTHING
+    `,
+  );
 }

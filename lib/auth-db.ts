@@ -1,5 +1,5 @@
 /**
- * 登入帳號與 cookie 簽章金鑰存在 Postgres（Railway），與籌碼資料的 D1 分開。
+ * 登入帳號與 cookie 簽章金鑰存在 Postgres（Railway），與籌碼資料（lib/futures-db.ts）同一個資料庫。
  * Worker 不能跨請求共用 TCP 連線，所以每次都開一條、用完即關；
  * 金鑰讀到後暫存在記憶體，平常只有登入時才會連資料庫。資料表不存在時會自動建立。
  */
@@ -31,7 +31,7 @@ export interface AuthUserRow {
 type Sql = postgres.Sql;
 
 export async function withSql<T>(databaseUrl: string | undefined, run: (sql: Sql) => Promise<T>): Promise<T> {
-  if (!databaseUrl?.trim()) throw new Error("尚未設定 DATABASE_URL，無法讀取登入帳號");
+  if (!databaseUrl?.trim()) throw new Error("尚未設定 DATABASE_URL，無法連線 Postgres");
   const sql = postgres(databaseUrl, { max: 1, connect_timeout: 10, idle_timeout: 5, onnotice: () => {} });
   try {
     return await run(sql);

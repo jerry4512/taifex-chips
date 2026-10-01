@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { withSql } from "../../../../lib/auth-db";
 import { collectReportInput } from "../../../../lib/chip-report";
 import {
   DAILY_DATA_JOB_LABELS,
@@ -12,6 +13,7 @@ import {
   markDailyJobDone,
   saveFuturesPosition,
   saveNightlyPosition,
+  saveTwseInstitutionalFlows,
 } from "../../../../lib/futures-db";
 import {
   DEFAULT_START_DATE,
@@ -25,7 +27,8 @@ import {
   readTelegramConfig,
   type TelegramEnv,
 } from "../../../../lib/telegram";
-import { getLatestBfi82u } from "../../../../lib/twse";
+import { listTelegramRecipients } from "../../../../lib/telegram-db";
+import { fetchLatestBfi82u } from "../../../../lib/twse";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +37,13 @@ async function telegramEnv(): Promise<TelegramEnv> {
   return env as unknown as TelegramEnv;
 }
 
+/** 收件人每次都從 Postgres 重讀，改完不必重啟。 */
+async function telegramConfig(env: TelegramEnv) {
+  return readTelegramConfig(env, await withSql(env.DATABASE_URL, listTelegramRecipients));
+}
+
 async function broadcast(message: string): Promise<boolean> {
-  const { token, targets } = readTelegramConfig(await telegramEnv());
+  const { token, targets } = await telegramConfig(await telegramEnv());
   const results = await broadcastTelegramMessage(token, targets, message);
   return results.some((result) => result.ok);
 }
@@ -56,11 +64,11 @@ const deps: DailyScheduleDeps = {
     await saveFuturesPosition(row);
     return true;
   },
-  // 證交所資料不存資料庫，只記「今天已取得」；報告推播時再抓一次最新值。
+  // BFI82U 只給最新一天：照樣存起來（可能是前一交易日），但只有日期是今天才算取得。
   async fetchSpot(date) {
-    if ((await getLatestBfi82u()).date !== date) return false;
-    await markDailyJobDone(date, "spot");
-    return true;
+    const raw = await fetchLatestBfi82u();
+    await saveTwseInstitutionalFlows(raw);
+    return raw.date === date;
   },
   async sendReport() {
     return broadcast(buildChipReport(await collectReportInput()));

@@ -1,4 +1,4 @@
-# 台指期籌碼：以 vite preview 在 workerd 中執行建置後的 Worker，本機 D1 由 miniflare 模擬。
+# 台指期籌碼：以 vite preview 在 workerd 中執行建置後的 Worker，資料存在 DATABASE_URL 的 Postgres。
 # workerd 需要 glibc，因此使用 Debian 版映像而非 Alpine。
 FROM node:22-bookworm-slim
 
@@ -19,9 +19,6 @@ RUN npm run build
 ENV WRANGLER_SEND_METRICS=false \
   # 讓 compose 傳入的 TELEGRAM_* 環境變數成為 Worker 的 env。
   CLOUDFLARE_INCLUDE_PROCESS_ENV=true
-
-# 本機 D1 資料存在 /app/.wrangler/state，需掛 volume 保存（compose 用 d1-data；
-# Railway 不支援 VOLUME 指令，改在後台新增 Railway Volume 掛到同一路徑）。
 
 EXPOSE 3000
 

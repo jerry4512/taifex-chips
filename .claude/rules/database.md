@@ -4,15 +4,18 @@ paths:
   - "drizzle/**"
   - "drizzle.config.ts"
   - "lib/futures-db.ts"
+  - "lib/data-admin.ts"
+  - "scripts/data.mjs"
 ---
 
-# D1 資料庫規則
+# 籌碼資料庫規則（Postgres）
 
-- **只存期交所揭露的原始口數**。約當換算、日變化、推估值、籌碼解讀都在 `listFuturesPositions` / `listNightlyPositions` 讀取時計算，新增欄位前先問：能否從原始口數算出？能就不要存。
+- **只存期交所揭露的原始口數**（證交所只存每列原始買進／賣出金額，買賣差額與四類法人合併在讀取時算）。約當換算、日變化、推估值、籌碼解讀都在 `listFuturesPositions` / `listNightlyPositions` 讀取時計算，新增欄位前先問：能否從原始口數算出？能就不要存。
 - **改 schema 必須三處同步**：
   1. `db/schema.ts`（Drizzle 定義）
   2. `npx drizzle-kit generate` 產生新的 `drizzle/NNNN_*.sql`（不要手改既有遷移檔）
-  3. `lib/futures-db.ts` 的 `createSchema` 內手寫 `CREATE TABLE IF NOT EXISTS` 與 `INSERT OR IGNORE` 種子資料
-- 寫入用 `INSERT ... ON CONFLICT(date) DO UPDATE`，重抓同一天即覆蓋更正；`collected_at` 保留首次寫入時間，只更新 `updated_at`。
-- 取得連線一律經過 `initializeDatabase()`（模組層快取、失敗會重設），不要在其他地方直接 `import("cloudflare:workers")` 拿 `env.DB`。
+  3. `lib/futures-db.ts` 的 `FUTURES_TABLES_SQL` 手寫 `CREATE TABLE IF NOT EXISTS`，以及 `createSchema` 的 `ON CONFLICT DO NOTHING` 種子資料
+- 寫入用 `INSERT ... ON CONFLICT(date) DO UPDATE`，重抓同一天即覆蓋更正；`collected_at` 保留首次寫入時間，只更新 `updated_at = now()`。日期欄位用 `TEXT`（`YYYY-MM-DD`），不要改成 `DATE`——postgres.js 會轉成 `Date` 物件，破壞字串比較。
+- 取得連線一律經過 `withDatabase()`（每次開一條連線、遇到 `42P01` 才建表重試）；同一次讀取要查多張表時放在同一個 `withDatabase` 裡，不要一次請求開多條連線。
+- 種子資料只在日盤／夜盤表「這次新建」時灌入（`createSchema` 先用 `to_regclass` 檢查），避免任一張表缺少觸發建表時，把 `npm run data -- clear` 清空過的資料灌回去。`lib/data-admin.ts` 的資料表名稱與 `FUTURES_TABLES_SQL` 要同步。
 - `daily_futures_positions.night_equivalent_net` 是已知冗餘欄位（與 `nightly_futures_positions` 重複）。除非使用者明確要求，不要順手移除或改成跨表計算——會改動下午 SOP 的既有流程。

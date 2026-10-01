@@ -10,9 +10,9 @@
 
 ## 資料庫
 
-Cloudflare D1，綁定名稱 `DB`（見 `.openai/hosting.json`）。共兩張表，schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
+Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegram 收件人同一個資料庫，見下方「登入」）。期交所籌碼兩張表、證交所現貨一張表，另有一張排程完成紀錄 `daily_schedule_jobs`；schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
 
-`lib/futures-db.ts` 會在首次取得連線時 `CREATE TABLE IF NOT EXISTS` 並以 `INSERT OR IGNORE` 灌入 2026/09/21–09/24 的種子資料（結果快取在模組層，同一個 worker isolate 只跑一次），所以空資料庫也能直接跑。
+`lib/futures-db.ts` 查詢時遇到「資料表不存在」（`42P01`）才 `CREATE TABLE IF NOT EXISTS`、以 `ON CONFLICT DO NOTHING` 灌入 2026/09/21–09/24 的種子資料並重試，所以空資料庫也能直接跑，平常查詢也不會多跑建表指令。Worker 不能跨請求共用連線，每次讀寫都開一條、用完即關。
 
 ### 只存原始口數，其餘即時計算
 
@@ -55,13 +55,40 @@ Cloudflare D1，綁定名稱 `DB`（見 `.openai/hosting.json`）。共兩張表
 
 兩邊都來自期交所同一份 `futContractsDateAh`，正常情況必然一致；但若某天只按了其中一顆、期交所之後又更正數據，理論上可能不同步。要根除的話得把 `night_equivalent_net` 移除、改成一律從 `nightly_futures_positions` 即時換算 —— 這會動到下午那條既有流程，目前保留原樣。
 
-### 查看本機資料
+### 表三：`twse_institutional_flows`（證交所現貨）
 
-同目錄下還有一個 miniflare 自用的 `metadata.sqlite`，要排掉：
+證交所 BFI82U 回傳的每一列原樣存一筆，主鍵為 `(date, item)`。單位為元，型別 `BIGINT`。
+
+| 資料庫欄位 | 說明 |
+| --- | --- |
+| `date` | 證交所資料日期 `YYYY-MM-DD` |
+| `item` | 證交所原始列名：`自營商(自行買賣)`、`自營商(避險)`、`投信`、`外資及陸資(不含外資自營商)`、`外資自營商`、`合計` |
+| `buy`／`sell` | 買進金額／賣出金額 |
+
+畫面與報告的四類法人在讀取時合併（`lib/twse.ts` 的 `combineBfi82u`）：自營商 = 自行買賣 + 避險，外資及陸資只取「不含外資自營商」那列，三大法人合計取「合計」列；**買賣差額 = 買進 − 賣出，不儲存**。BFI82U 只提供最新一個交易日，所以只能從開始存的那天起累積，無法回補更早的日子。
+
+另有 `collected_at`、`updated_at`。
+
+### 查看與清空資料
 
 ```bash
-sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -v metadata)" \
-  "SELECT * FROM nightly_futures_positions ORDER BY date;"
+npm run data -- list               # 各表的日期數與日期範圍
+npm run data -- clear spot         # 清空證交所三大法人
+npm run data -- clear night        # 清空期交所夜盤
+npm run data -- clear day          # 清空期交所日盤
+npm run data -- clear night,day    # 逗號分隔一次清多張
+npm run data -- clear all          # 三張全部清空
+```
+
+- 清空前會列出連到哪個資料庫（只顯示主機，不印帳密）與要刪的日期範圍，**輸入 `yes` 才會刪**；加 `--yes` 可跳過確認，非互動環境沒加 `--yes` 會中止並回傳錯誤碼。
+- 多張表在同一個交易裡刪除，任一張失敗就全部不刪。只刪資料、保留資料表，所以網站**不會再灌回 09/21–09/24 的種子資料**；要恢復請在網頁上逐日按「取得資料」「取得夜盤資料」重抓（證交所只能取得最新一天）。
+- 排程完成紀錄 `daily_schedule_jobs` 不受影響：當天已推播過的報告不會因清空而重發，但缺的日盤／夜盤仍會在下一輪補抓。
+- `.env` 的 `DATABASE_URL` 若指向 Railway，清掉的就是正式資料，執行前先看清楚第一行顯示的資料庫位置。
+
+直接下 SQL：
+
+```bash
+psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 ```
 
 ---
@@ -106,7 +133,8 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 | `POST` | `/api/trading-doctor/taifex-futures-after-hours` | `{"date":"YYYY-MM-DD"}`，抓期交所夜盤並存入資料庫 |
 | `GET` | `/api/trading-doctor/taifex-futures` | 讀出日盤明細與籌碼解讀 |
 | `POST` | `/api/trading-doctor/taifex-futures` | `{"date":"YYYY-MM-DD"}`，抓期交所全日與夜盤並存入資料庫 |
-| `GET` | `/api/trading-doctor/bfi82u` | 證交所最新三大法人買賣金額 |
+| `GET` | `/api/trading-doctor/bfi82u` | 讀出資料庫裡最新一天的證交所三大法人買賣金額（尚未存過回 404） |
+| `POST` | `/api/trading-doctor/bfi82u` | 抓證交所最新一天並存入資料庫（不帶日期，BFI82U 不能指定日期） |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
 | `POST` | `/api/trading-doctor/daily-schedule` | 排程用：補抓今天還沒拿到的夜盤／日盤／證交所，到齊後推播（見下方「平日自動排程」） |
@@ -119,26 +147,39 @@ sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -
 
 ## Telegram 推播
 
-設定寫在 `.env`（已被 `.gitignore` 忽略），範本見 `.env.example`，內含取得 token 與 chat ID 的逐步說明。
+Bot token 寫在 `.env`（已被 `.gitignore` 忽略），範本見 `.env.example`，內含取得 token 與 chat ID 的逐步說明。收件人存在 `DATABASE_URL` 指向的 Postgres（與登入帳號同一個資料庫，`lib/telegram-db.ts`），用指令管理：
 
 ```bash
 TELEGRAM_BOT_TOKEN=8123456789:AAFk...
-TELEGRAM_CHAT_IDS=我:123456789,Jimmy:987654321
+
+npm run recipients -- add 123456789 我          # 新增收件人，或幫既有 chatId 改標籤
+npm run recipients -- add -1001234567890 交易群
+npm run recipients -- remove 123456789          # 刪除收件人
+npm run recipients -- list                      # 列出收件人
 ```
 
-`TELEGRAM_CHAT_IDS` 以逗號（或換行）分隔多位收件人，每筆可寫成 `標籤:chatId` 或只寫 `chatId`。標籤只作顯示用，會出現在畫面與傳送結果上。個人 chat ID 為正數、群組為負數、公開頻道可用 `@username`。
+標籤只作顯示用，會出現在畫面與傳送結果上，省略時以 chatId 顯示。個人 chat ID 為正數、群組為負數、公開頻道可用 `@username`。收件人每次推播都從資料庫重讀，改完不用重開伺服器。
+
+`telegram_recipients`：
+
+| 欄位 | 型別 | 說明 |
+| --- | --- | --- |
+| `chat_id` | `TEXT PRIMARY KEY` | Telegram chat ID 或 `@username` |
+| `label` | `TEXT` | 顯示用標籤 |
+| `created_at`／`updated_at` | `TIMESTAMPTZ` | 新增／最後改標籤時間；推播依新增順序 |
+
+資料表由 `npm run recipients` 第一次執行時建立；網站讀取時表還不存在就視同沒有收件人。
 
 三個常見地雷：
 
-1. **`.env` 只在啟動時讀取**，改完要重開 `npm run dev`
-2. `.env.example` 說明區塊裡的範例行開頭有 `#`，是註解，改那裡不會生效 —— 要改檔案最下方沒有 `#` 的那兩行
+1. **`.env` 只在啟動時讀取**，改 token 後要重開 `npm run dev`（收件人不受影響）
+2. `.env.example` 說明區塊裡的範例行開頭有 `#`，是註解，改那裡不會生效 —— 要改檔案下方沒有 `#` 的那一行
 3. 收件人必須**先主動對 bot 說過話**，否則 Telegram 會回 `chat not found`
 
-正式部署時 `.env` 不會被帶上去，改用 secret：
+正式部署時 `.env` 不會被帶上去，改用 secret（`DATABASE_URL` 見下方「登入」）：
 
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_CHAT_IDS
 ```
 
 推播內容（`lib/telegram.ts` 的 `buildChipReport`）：
@@ -155,13 +196,13 @@ npx wrangler secret put TELEGRAM_CHAT_IDS
 籌碼型態 偏多 🔴
 ```
 
-標題日期以期貨為準；證交所若落後一天，現貨那行會加註 `※2026/09/23`。任一來源取不到時只有該段顯示「尚無資料」，不影響另一段。
+現貨與期貨都讀資料庫裡最新的一天。標題日期以期貨為準；證交所若落後一天，現貨那行會加註 `※2026/09/23`。任一來源取不到時只有該段顯示「尚無資料」，不影響另一段。
 
 ---
 
 ## 登入
 
-整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料的 D1 分開。唯一要設定的環境變數是 `DATABASE_URL`：
+整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料同一個資料庫。唯一要設定的環境變數是 `DATABASE_URL`：
 
 ```bash
 DATABASE_URL=postgresql://…         # Railway 上填 ${{Postgres.DATABASE_URL}}
@@ -210,7 +251,7 @@ npm run dev     # http://localhost:3000
 
 ## Docker
 
-不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，沒有 D1，不能用）。
+不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，不是 Worker 執行環境，不能用）。
 
 ```bash
 docker compose up -d --build   # http://localhost:3000
@@ -218,8 +259,8 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_IDS`、`DATABASE_URL` 三個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
-- **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
+- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`DATABASE_URL` 兩個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入、讀寫籌碼資料，也無法推播。
+- **資料庫**：籌碼資料存在 `DATABASE_URL` 指向的 Postgres，容器本身不存資料，`down` 或重建都不影響；和 `npm run dev` 用的 `.env` 指向同一個資料庫時，兩邊看到的是同一份。
 - **改程式後**：要加 `--build` 重建映像。
 
 ### 平日自動排程
@@ -227,11 +268,11 @@ docker compose down            # 停止（資料保留）
 `compose.yaml` 的 `scheduler` 容器每 5 分鐘呼叫一次 `POST /api/trading-doctor/daily-schedule`，實際判斷在 `lib/daily-schedule.ts`：
 
 - **時段**：週一到週五、台北時間 14:50 起；週末與 14:50 前直接略過，不連外。
-- **每輪只補缺的**：夜盤、日盤看資料庫有沒有當天那列；證交所看回傳的資料日期是不是今天（只記「已取得」，不存數值）。
+- **每輪只補缺的**：夜盤、日盤看資料庫有沒有當天那列；證交所則是先抓最新一天、存進 `twse_institutional_flows`（即使還是前一交易日也照存），再看資料庫有沒有今天的資料。
 - **補抓前幾天**：每天第一輪（通常是 14:50）先補最近 7 天內資料庫缺的平日夜盤／日盤，一天只補一次（休市日本來就抓不到，不重複白打）。只補資料、不補發當天的報告。缺一天會讓隔天的純日盤變化量、籌碼型態與開盤推估改用更早一天當基準而算錯，所以要先補齊再抓今天。
 - **三項到齊**：推播一次籌碼報告（與「傳送籌碼報告」按鈕同一份）。至少一位收件人成功就算完成；全部失敗則下一輪重試。
 - **18:00 仍未到齊**（例如休市日）：推播一則「截至 18:00 仍未取得：…」通知，當天不再重試。
-- 完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
+- 報告、補抓、缺漏通知的完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
 - 看執行紀錄：`docker compose logs -f scheduler`（略過的輪次不寫紀錄）。
 
 ## 驗證

@@ -6,7 +6,6 @@ import { loadSessionSecret } from "../lib/auth-db";
 
 interface Env {
   ASSETS: Fetcher;
-  DB: D1Database;
   DATABASE_URL?: string;
   IMAGES: {
     input(stream: ReadableStream): {
