@@ -65,7 +65,11 @@ export interface DailyScheduleDeps {
   /** 至少一位收件人成功即回傳 true。 */
   sendReport(date: string): Promise<boolean>;
   sendMissingNotice(date: string, missing: DailyDataJob[]): Promise<boolean>;
+  /** 每一步的執行紀錄；略過與已完成的輪次不寫，避免每 5 分鐘洗版。 */
+  log?(level: ScheduleLogLevel, message: string): void;
 }
+
+export type ScheduleLogLevel = "info" | "error";
 
 export type DailyScheduleStatus =
   | "skipped"
@@ -108,6 +112,10 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知錯誤";
 }
 
+function jobLabels(jobs: readonly DailyDataJob[]): string {
+  return jobs.map((job) => DAILY_DATA_JOB_LABELS[job]).join("、");
+}
+
 export async function runDailySchedule(
   now: Date,
   deps: DailyScheduleDeps,
@@ -128,6 +136,10 @@ export async function runDailySchedule(
     return { ...result, status: "done" };
   }
 
+  // 前綴帶台北日期與時間，docker compose logs 不加 -t 也看得出是哪一輪。
+  const log = (level: ScheduleLogLevel, message: string) =>
+    deps.log?.(level, `[排程 ${date} ${time}] ${message}`);
+
   const fetchers: Record<DailyDataJob, (date: string) => Promise<boolean>> = {
     night: deps.fetchNight,
     day: deps.fetchDay,
@@ -139,25 +151,41 @@ export async function runDailySchedule(
     for (const pastDate of backfillDates(date, deps.earliestDate)) {
       for (const job of ["night", "day"] as const) {
         if (await deps.isDone(pastDate, job)) continue;
+        const label = `補抓 ${pastDate} ${DAILY_DATA_JOB_LABELS[job]}`;
         try {
           const filled = await fetchers[job](pastDate);
           result.backfill.push({ date: pastDate, job, status: filled ? "filled" : "missing" });
+          log("info", `${label}：${filled ? "已補上" : "查無資料（可能是休市日）"}`);
         } catch (error) {
           result.backfill.push({ date: pastDate, job, status: "error", error: errorMessage(error) });
+          log("error", `${label}：抓取失敗：${errorMessage(error)}`);
         }
       }
+    }
+    if (result.backfill.length === 0) {
+      log("info", `最近 ${BACKFILL_DAYS} 天的夜盤、日盤都已齊全，不需補抓`);
     }
     await deps.markDone(date, "backfill");
   }
 
   // 依序抓，避免同時對期交所連發多個請求。
   for (const job of DAILY_DATA_JOBS) {
-    if (await deps.isDone(date, job)) continue;
+    const label = DAILY_DATA_JOB_LABELS[job];
+    if (await deps.isDone(date, job)) {
+      log("info", `${label}：資料庫已有，略過`);
+      continue;
+    }
     try {
-      if (!(await fetchers[job](date))) result.missing.push(job);
+      if (await fetchers[job](date)) {
+        log("info", `${label}：已取得並存入`);
+      } else {
+        result.missing.push(job);
+        log("info", `${label}：尚未公布`);
+      }
     } catch (error) {
       result.missing.push(job);
       result.errors[job] = errorMessage(error);
+      log("error", `${label}：抓取失敗：${errorMessage(error)}`);
     }
   }
 
@@ -165,26 +193,36 @@ export async function runDailySchedule(
     try {
       if (await deps.sendReport(date)) {
         await deps.markDone(date, "report");
+        log("info", "三項到齊，籌碼報告推播成功");
         return { ...result, status: "reported" };
       }
       result.errors.report = "所有收件人都傳送失敗";
     } catch (error) {
       result.errors.report = errorMessage(error);
     }
+    log("error", `籌碼報告推播失敗：${result.errors.report}，下一輪重試`);
     return { ...result, status: "waiting" };
   }
 
   if (time >= SCHEDULE_GIVE_UP_TIME) {
+    const missing = jobLabels(result.missing);
     try {
       if (await deps.sendMissingNotice(date, result.missing)) {
         await deps.markDone(date, "missing-notice");
+        log("info", `已過 ${SCHEDULE_GIVE_UP_TIME} 仍缺 ${missing}，缺漏通知推播成功，今天不再重試`);
         return { ...result, status: "gave-up" };
       }
       result.errors["missing-notice"] = "所有收件人都傳送失敗";
     } catch (error) {
       result.errors["missing-notice"] = errorMessage(error);
     }
+    log(
+      "error",
+      `已過 ${SCHEDULE_GIVE_UP_TIME} 仍缺 ${missing}，缺漏通知推播失敗：${result.errors["missing-notice"]}，下一輪重試`,
+    );
+    return { ...result, status: "waiting" };
   }
 
+  log("info", `仍缺 ${jobLabels(result.missing)}，下一輪再試`);
   return { ...result, status: "waiting" };
 }

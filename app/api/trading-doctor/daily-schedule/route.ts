@@ -45,6 +45,10 @@ async function telegramConfig(env: TelegramEnv) {
 async function broadcast(message: string): Promise<boolean> {
   const { token, targets } = await telegramConfig(await telegramEnv());
   const results = await broadcastTelegramMessage(token, targets, message);
+  for (const result of results) {
+    if (result.ok) console.log(`[排程] Telegram ${result.label}：已送出`);
+    else console.error(`[排程] Telegram ${result.label}：傳送失敗：${result.error ?? "未知錯誤"}`);
+  }
   return results.some((result) => result.ok);
 }
 
@@ -82,6 +86,10 @@ const deps: DailyScheduleDeps = {
       ),
     );
   },
+  log(level, message) {
+    if (level === "error") console.error(message);
+    else console.log(message);
+  },
 };
 
 /** 由 compose 的 scheduler 容器每 5 分鐘呼叫；是否該抓、抓哪些由 runDailySchedule 判斷。 */
@@ -92,6 +100,7 @@ export async function POST() {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "無法讀取資料庫";
+    console.error(`[排程] 執行中斷：${message}`);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
