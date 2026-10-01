@@ -5,12 +5,10 @@ services:
     ports:
       - "3000:3000"
     # 值由 compose 從專案目錄的 .env 帶入（只傳這兩個）；.env 不存在或沒填時為空字串，
-    # 照樣啟動，但無法登入與推播。
+    # 照樣啟動，但無法登入、讀寫籌碼資料與推播。
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       DATABASE_URL: ${DATABASE_URL:-}
-    volumes:
-      - d1-data:/app/.wrangler/state
     restart: unless-stopped
 
   # 平日 14:50 起每 5 分鐘自動抓夜盤、日盤、證交所，到齊後推播 Telegram（見 lib/daily-schedule.ts）。
@@ -23,6 +21,3 @@ services:
     depends_on:
       - taifex-chips
     restart: unless-stopped
-
-volumes:
-  d1-data:
