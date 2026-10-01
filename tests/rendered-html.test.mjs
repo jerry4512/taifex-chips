@@ -35,6 +35,10 @@ test("server renders the futures positioning page", async () => {
   assert.match(html, /開盤預估約當淨 OI/);
   assert.match(html, /夜盤約當買賣超/);
   assert.match(html, /2026\/09\/21 因缺少前一交易日基準/);
+  // 開啟頁面會自動讀資料庫，伺服器端先渲染成載入中，而不是「沒有資料」。
+  assert.match(html, /正在讀取資料庫的證交所資料/);
+  assert.match(html, /正在讀取資料庫的夜盤資料/);
+  assert.match(html, /正在讀取資料庫的日盤資料/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
   assert.match(html, /action="\/api\/auth\/logout"/);
 });
@@ -92,7 +96,8 @@ test("offers a date-specific database acquisition flow", async () => {
   assert.match(afterHoursRoute, /export async function GET/);
   assert.match(afterHoursRoute, /export async function POST/);
   assert.match(afterHoursRoute, /futContractsDateAh|TAIFEX_AFTER_HOURS_SOURCE/);
-  assert.equal(JSON.parse(hosting).d1, "DB");
+  // 籌碼資料改存 Postgres（DATABASE_URL），不再綁定 D1。
+  assert.equal(JSON.parse(hosting).d1, null);
 });
 
 test("documents the Telegram environment variables without committing secrets", async () => {

@@ -1,5 +1,5 @@
 /**
- * 登入帳號與 cookie 簽章金鑰存在 Postgres（Railway），與籌碼資料的 D1 分開。
+ * 登入帳號與 cookie 簽章金鑰存在 Postgres（Railway），與籌碼資料（lib/futures-db.ts）同一個資料庫。
  * Worker 不能跨請求共用 TCP 連線，所以每次都開一條、用完即關；
  * 金鑰讀到後暫存在記憶體，平常只有登入時才會連資料庫。資料表不存在時會自動建立。
  */

@@ -9,7 +9,7 @@
 
 ## 開發工程師職責
 
-- **理解再動手**：改動前先讀相關的 `lib/`、route 與測試，確認資料從期交所 → 解析 → D1 → 讀取計算 → API → 畫面的完整路徑，避免只修一端。
+- **理解再動手**：改動前先讀相關的 `lib/`、route 與測試，確認資料從期交所 → 解析 → Postgres → 讀取計算 → API → 畫面的完整路徑，避免只修一端。
 - **分層清楚**：純計算與解析放 `lib/`（可被 `node --test` 直接測）；route 只做輸入驗證與轉呼叫；`app/page.tsx` 只透過 API 取資料。
 - **型別嚴謹**：TypeScript 型別從 `lib/` 匯出並共用（前端用 `import type`），不用 `any`；可能缺值的欄位明確標為 `| null`，不以 0 代替。
 - **測試先行驗證**：
@@ -17,14 +17,14 @@
   - 對外抓取一律透過可注入的 `fetcher`，測試不連網。
   - 完成前至少跑 `npm run lint` 與相關測試；動到頁面或 route 時跑完整 `npm test`（含 build）。
 - **貼近現有風格**：沿用既有命名（API 欄位 camelCase、DB 欄位 snake_case）、錯誤處理模式（`{ error }` ＋ 對應狀態碼）與註解密度，不引入新套件或框架，除非使用者同意。
-- **部署意識**：程式跑在 Cloudflare Workers，不可依賴本機檔案系統或長駐程序，Node API 只能用 `nodejs_compat` 支援的部分；環境變數與 D1 經 `cloudflare:workers` 取得；schema 變更要能透過 `drizzle/` 遷移套用到正式環境。
+- **部署意識**：程式跑在 Cloudflare Workers，不可依賴本機檔案系統或長駐程序，Node API 只能用 `nodejs_compat` 支援的部分；環境變數（含 `DATABASE_URL`）經 `cloudflare:workers` 取得；schema 變更要能透過 `drizzle/` 遷移套用到正式環境。
 - **版本控制**：只在使用者要求時才 commit／push；commit 訊息沿用現有 Conventional Commits 格式（`feat:`、`fix:`、`chore:`、`style:`）。
 
 ## 領域專業背景
 
 - **市場知識**：了解臺灣期貨交易所三大法人未平倉揭露、大台（TX）／小台（MTX）／微台（TMF）的契約規模比例（1 : 1/4 : 1/20）、日盤與盤後交易時段（夜盤）的差異，以及證交所三大法人現貨買賣金額（BFI82U）。
 - **術語**：使用台股慣用說法——「口」「未平倉（OI）」「買賣超」「約當大台」「偏多／偏空」「紅漲綠跌」。不要翻成英文或改成歐美慣例。
-- **技術棧**：vinext（Vite 版 Next App Router）＋ React 19 ＋ Cloudflare Workers／D1 ＋ Drizzle ＋ Tailwind 4，測試用 `node:test`。
+- **技術棧**：vinext（Vite 版 Next App Router）＋ React 19 ＋ Cloudflare Workers ＋ Postgres（postgres.js）＋ Drizzle ＋ Tailwind 4，測試用 `node:test`。
 
 ## 工作原則
 
