@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 需要 Node.js ≥ 22.13。
 
 ```bash
-npm run dev          # vinext dev（Vite + Cloudflare 外掛，本機 D1 由 miniflare 模擬），http://localhost:3000
+npm run dev          # vinext dev（Vite + Cloudflare 外掛，資料庫為 `.env` 的 `DATABASE_URL`），http://localhost:3000
 npm run build        # 輸出到 dist/
 npm test             # 先 build，再 node --test tests/*.test.mjs
 npm run lint         # eslint
@@ -31,12 +31,12 @@ node --test --test-name-pattern="full-day" tests/taifex.test.mjs
 
 ## 架構
 
-- **執行環境**：不是一般 Next.js。使用 `vinext`（以 Vite 實作 Next App Router API）跑在 Cloudflare Workers 上；`worker/index.ts` 是 Worker 入口，`vite.config.ts` 設定本機 binding（D1 綁定名 `DB` 來自 `.openai/hosting.json`）。`build/sites-vite-plugin.ts` 在 build 後把 `hosting.json` 與 `drizzle/` 複製進 `dist/.openai/` 供部署平台套用遷移。
-- **存取 Cloudflare env**：伺服器端一律用 `await import("cloudflare:workers")` 取 `env`（D1 在 `lib/futures-db.ts`，Telegram secret 在 `telegram-test` route）。本機 `.env` 只在啟動時讀取；正式環境用 `wrangler secret put`。
+- **執行環境**：不是一般 Next.js。使用 `vinext`（以 Vite 實作 Next App Router API）跑在 Cloudflare Workers 上；`worker/index.ts` 是 Worker 入口，`vite.config.ts` 設定本機 binding（`.openai/hosting.json` 的 `d1` 已設為 `null`，不再使用 D1）。`build/sites-vite-plugin.ts` 在 build 後把 `hosting.json` 與 `drizzle/` 複製進 `dist/.openai/`；`drizzle/` 現在是 Postgres 遷移，僅供參考，實際建表由 `lib/futures-db.ts` 在資料表不存在時自動執行。
+- **存取 Cloudflare env**：伺服器端一律用 `await import("cloudflare:workers")` 取 `env`（`DATABASE_URL` 在 `lib/futures-db.ts`，Telegram secret 在 `telegram-test` route）。本機 `.env` 只在啟動時讀取；正式環境用 `wrangler secret put`。
 - **分層**：
   - `lib/taifex.ts`：抓期交所 HTML（`futContractsDate` 全日、`futContractsDateAh` 夜盤）、解析外資淨口數、純函式計算（`equivalentTxContracts`、`excelRound`、`estimateOpenEquivalentNetOi`、`interpretChipChange`）、台北時區日期工具。
   - `lib/twse.ts`：證交所 BFI82U JSON 解析。
-  - `lib/futures-db.ts`：D1 讀寫，並在讀取時算出所有衍生欄位。
+  - `lib/futures-db.ts`：籌碼資料存 Postgres（`DATABASE_URL`，經 `lib/auth-db.ts` 的 `withSql`），並在讀取時算出所有衍生欄位。
   - `lib/auth.ts`：帳號密碼登入的純函式（PBKDF2 雜湊、HMAC 簽 cookie）；`lib/auth-db.ts`：帳號（`auth_users`）與 cookie 簽章金鑰（`auth_settings`，自動產生、記憶體暫存 5 分鐘）存在 Postgres（`DATABASE_URL`，postgres.js），用 `npm run users` 管理。`worker/index.ts` 匯出 `createWorker({ loadSecret })` 讓 SSR 測試注入假金鑰。`worker/index.ts` 在交給 vinext 前呼叫 `gateRequest` 擋下未登入請求，只有 `/login`、`/api/auth/*` 與靜態檔公開。
   - `lib/telegram.ts`：chat ID 驗證、組報告文字、廣播；`lib/telegram-db.ts`：收件人（`telegram_recipients`）存在同一個 Postgres，用 `npm run recipients` 管理。
   - `app/api/trading-doctor/*/route.ts`：薄薄一層，`GET` 只讀資料庫不連外，`POST {"date"}` 才去期交所抓並寫入。
@@ -50,9 +50,8 @@ node --test --test-name-pattern="full-day" tests/taifex.test.mjs
 - 四捨五入用 `excelRound`，不可用 `Math.round`。
 - UI 與錯誤訊息皆為繁體中文。
 
-查看本機 D1 資料（需排除 miniflare 的 `metadata.sqlite`）：
+查看資料：
 
 ```bash
-sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -v metadata)" \
-  "SELECT * FROM nightly_futures_positions ORDER BY date;"
+psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 ```

@@ -10,9 +10,9 @@
 
 ## 資料庫
 
-Cloudflare D1，綁定名稱 `DB`（見 `.openai/hosting.json`）。共兩張表，schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
+Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegram 收件人同一個資料庫，見下方「登入」）。籌碼資料共兩張表，另有一張排程完成紀錄 `daily_schedule_jobs`；schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
 
-`lib/futures-db.ts` 會在首次取得連線時 `CREATE TABLE IF NOT EXISTS` 並以 `INSERT OR IGNORE` 灌入 2026/09/21–09/24 的種子資料（結果快取在模組層，同一個 worker isolate 只跑一次），所以空資料庫也能直接跑。
+`lib/futures-db.ts` 查詢時遇到「資料表不存在」（`42P01`）才 `CREATE TABLE IF NOT EXISTS`、以 `ON CONFLICT DO NOTHING` 灌入 2026/09/21–09/24 的種子資料並重試，所以空資料庫也能直接跑，平常查詢也不會多跑建表指令。Worker 不能跨請求共用連線，每次讀寫都開一條、用完即關。
 
 ### 只存原始口數，其餘即時計算
 
@@ -55,13 +55,10 @@ Cloudflare D1，綁定名稱 `DB`（見 `.openai/hosting.json`）。共兩張表
 
 兩邊都來自期交所同一份 `futContractsDateAh`，正常情況必然一致；但若某天只按了其中一顆、期交所之後又更正數據，理論上可能不同步。要根除的話得把 `night_equivalent_net` 移除、改成一律從 `nightly_futures_positions` 即時換算 —— 這會動到下午那條既有流程，目前保留原樣。
 
-### 查看本機資料
-
-同目錄下還有一個 miniflare 自用的 `metadata.sqlite`，要排掉：
+### 查看資料
 
 ```bash
-sqlite3 "$(ls .wrangler/state/v3/d1/miniflare-D1DatabaseObject/*.sqlite | grep -v metadata)" \
-  "SELECT * FROM nightly_futures_positions ORDER BY date;"
+psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 ```
 
 ---
@@ -174,7 +171,7 @@ npx wrangler secret put TELEGRAM_BOT_TOKEN
 
 ## 登入
 
-整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料的 D1 分開。唯一要設定的環境變數是 `DATABASE_URL`：
+整個網站（儀表板與所有 API）都需要登入，檢查寫在 `worker/index.ts` 最前面（`lib/auth.ts` 的 `gateRequest`）。帳號密碼自己管理，帳號與 cookie 簽章金鑰都存在 Postgres（`lib/auth-db.ts`），和籌碼資料同一個資料庫。唯一要設定的環境變數是 `DATABASE_URL`：
 
 ```bash
 DATABASE_URL=postgresql://…         # Railway 上填 ${{Postgres.DATABASE_URL}}
@@ -223,7 +220,7 @@ npm run dev     # http://localhost:3000
 
 ## Docker
 
-不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，沒有 D1，不能用）。
+不想在本機裝 Node.js 時可用 Docker。容器內會先 `npm run build`，再用 `vite preview` 在 workerd 裡跑建置後的 Worker（`vinext start` 是純 Node 伺服器，不是 Worker 執行環境，不能用）。
 
 ```bash
 docker compose up -d --build   # http://localhost:3000
@@ -231,8 +228,8 @@ docker compose logs -f         # 看伺服器紀錄
 docker compose down            # 停止（資料保留）
 ```
 
-- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`DATABASE_URL` 兩個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入，也無法推播。
-- **資料庫**：本機 D1 存在 named volume `d1-data`（掛在容器的 `/app/.wrangler/state`），`down` 後資料仍在；要清空重來用 `docker compose down -v`。容器內的資料庫和 `npm run dev` 用的 `.wrangler/` 是分開的兩份。
+- **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`DATABASE_URL` 兩個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入、讀寫籌碼資料，也無法推播。
+- **資料庫**：籌碼資料存在 `DATABASE_URL` 指向的 Postgres，容器本身不存資料，`down` 或重建都不影響；和 `npm run dev` 用的 `.env` 指向同一個資料庫時，兩邊看到的是同一份。
 - **改程式後**：要加 `--build` 重建映像。
 
 ### 平日自動排程
