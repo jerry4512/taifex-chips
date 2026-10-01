@@ -63,7 +63,7 @@ test("safeNextPath only allows same-site paths", () => {
   assert.equal(safeNextPath(null), "/");
 });
 
-test("gateRequest redirects pages, 401s APIs, and lets sessions through", async () => {
+test("gateRequest redirects pages, leaves APIs public, and lets sessions through", async () => {
   const token = await createSessionToken("ck", SECRET);
   let secretLoads = 0;
   const loadSecret = async () => {
@@ -75,9 +75,9 @@ test("gateRequest redirects pages, 401s APIs, and lets sessions through", async 
   assert.equal(page?.status, 302);
   assert.equal(page?.headers.get("location"), "/login?next=%2F%3Fx%3D1");
 
-  const api = await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u"), loadSecret);
-  assert.equal(api?.status, 401);
-  assert.deepEqual(await api?.json(), { error: "請先登入" });
+  // API 不需要登入。
+  assert.equal(await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u"), loadSecret), null);
+  assert.equal(await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u", { method: "POST" }), loadSecret), null);
   // 沒帶 cookie 的請求不需要讀金鑰，不會連資料庫。
   assert.equal(secretLoads, 0);
 
@@ -103,9 +103,8 @@ test("gateRequest fails closed when the secret cannot be loaded", async () => {
     assert.equal(page?.status, 302);
     assert.equal(page?.headers.get("location"), "/login?error=db");
 
-    const api = await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u", { headers: { cookie } }), broken);
-    assert.equal(api?.status, 503);
-    assert.deepEqual(await api?.json(), { error: "無法連線帳號資料庫" });
+    // API 公開，金鑰讀不到也照樣放行，不會先去連資料庫。
+    assert.equal(await gateRequest(new Request("http://localhost/api/trading-doctor/bfi82u", { headers: { cookie } }), broken), null);
   } finally {
     console.error = originalError;
   }
