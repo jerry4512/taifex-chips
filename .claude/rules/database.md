@@ -8,7 +8,7 @@ paths:
 
 # 籌碼資料庫規則（Postgres）
 
-- **只存期交所揭露的原始口數**。約當換算、日變化、推估值、籌碼解讀都在 `listFuturesPositions` / `listNightlyPositions` 讀取時計算，新增欄位前先問：能否從原始口數算出？能就不要存。
+- **只存期交所揭露的原始口數**（證交所只存每列原始買進／賣出金額，買賣差額與四類法人合併在讀取時算）。約當換算、日變化、推估值、籌碼解讀都在 `listFuturesPositions` / `listNightlyPositions` 讀取時計算，新增欄位前先問：能否從原始口數算出？能就不要存。
 - **改 schema 必須三處同步**：
   1. `db/schema.ts`（Drizzle 定義）
   2. `npx drizzle-kit generate` 產生新的 `drizzle/NNNN_*.sql`（不要手改既有遷移檔）
