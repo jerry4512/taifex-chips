@@ -8,7 +8,11 @@ import type {
   TaifexFuturesResponse,
   TaifexFuturesRow,
 } from "../lib/taifex";
-import type { TwseBfi82uResponse, TwseInstitutionFlow } from "../lib/twse";
+import type {
+  TwseBfi82uDay,
+  TwseBfi82uListResponse,
+  TwseInstitutionName,
+} from "../lib/twse";
 import type {
   TelegramStatusResponse,
   TelegramTestResponse,
@@ -156,25 +160,21 @@ function AfterHoursDataRow({
   );
 }
 
-function SpotFlowCard({ flow }: { flow: TwseInstitutionFlow }) {
+const SPOT_COLUMNS: TwseInstitutionName[] = ["外資及陸資", "投信", "自營商", "三大法人合計"];
+
+function SpotDataRow({ day }: { day: TwseBfi82uDay }) {
   return (
-    <article className={`spot-flow-card ${flow.name === "三大法人合計" ? "spot-total" : ""}`}>
-      <div className="spot-flow-heading">
-        <h3>{flow.name}</h3>
-        <span>買賣差額</span>
-      </div>
-      <strong className={valueTone(flow.difference)}>{formatHundredMillion(flow.difference)}</strong>
-      <dl>
-        <div>
-          <dt>買進</dt>
-          <dd>{formatHundredMillion(flow.buy)}</dd>
-        </div>
-        <div>
-          <dt>賣出</dt>
-          <dd>{formatHundredMillion(flow.sell)}</dd>
-        </div>
-      </dl>
-    </article>
+    <tr>
+      <th scope="row">{formatDate(day.date)}</th>
+      {SPOT_COLUMNS.map((name) => {
+        const flow = day.flows.find((item) => item.name === name);
+        return (
+          <td key={name} className={valueTone(flow?.difference ?? null)}>
+            {flow ? formatHundredMillion(flow.difference) : ""}
+          </td>
+        );
+      })}
+    </tr>
   );
 }
 
@@ -192,10 +192,12 @@ async function readDatabase<T>(url: string, fallbackError: string): Promise<T | 
 }
 
 export default function Home() {
-  const [spotReport, setSpotReport] = useState<TwseBfi82uResponse | null>(null);
+  const [spotReport, setSpotReport] = useState<TwseBfi82uListResponse | null>(null);
   const [spotError, setSpotError] = useState<string | null>(null);
   const [spotLoading, setSpotLoading] = useState(true);
   const [spotSaving, setSpotSaving] = useState(false);
+  const [spotDate, setSpotDate] = useState(taipeiToday);
+  const [spotNotice, setSpotNotice] = useState<string | null>(null);
   const [report, setReport] = useState<TaifexFuturesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -216,7 +218,7 @@ export default function Home() {
   // 讀取函式只在 Promise 回呼裡更新狀態，才能直接在開啟頁面的 effect 裡呼叫。
   const loadSpotReport = useCallback(
     () =>
-      readDatabase<TwseBfi82uResponse>("/api/trading-doctor/bfi82u", "無法讀取證交所資料")
+      readDatabase<TwseBfi82uListResponse>("/api/trading-doctor/bfi82u", "無法讀取證交所資料")
         .then(
           (payload) => {
             setSpotReport(payload);
@@ -228,20 +230,29 @@ export default function Home() {
     [],
   );
 
-  const acquireSpotReport = useCallback(async () => {
+  const acquireSpotDate = useCallback(async () => {
     setSpotSaving(true);
+    setSpotNotice(null);
     try {
-      const response = await fetch("/api/trading-doctor/bfi82u", { method: "POST" });
-      const payload = (await response.json()) as TwseBfi82uResponse & { error?: string };
+      const response = await fetch("/api/trading-doctor/bfi82u", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: spotDate }),
+      });
+      const payload = (await response.json()) as TwseBfi82uListResponse & {
+        error?: string;
+        savedDate?: string;
+      };
       if (!response.ok) throw new Error(payload.error ?? "無法取得證交所資料");
       setSpotReport(payload);
       setSpotError(null);
+      setSpotNotice(`${formatDate(payload.savedDate ?? spotDate)} 證交所資料已儲存`);
     } catch (reason) {
       window.alert(reason instanceof Error ? reason.message : "無法取得證交所資料");
     } finally {
       setSpotSaving(false);
     }
-  }, []);
+  }, [spotDate]);
 
   const loadReport = useCallback(
     () =>
@@ -462,41 +473,79 @@ export default function Home() {
         ) : null}
       </section>
 
-      <section className="spot-section" aria-labelledby="spot-title">
-        <div className="spot-section-heading">
+      <section className="report-card spot-section" aria-labelledby="spot-title">
+        <div className="report-heading">
           <div>
             <p className="section-kicker">證交所現貨</p>
             <h2 id="spot-title">最新三大法人買賣金額</h2>
           </div>
-          <div className="spot-date">
-            <span>資料日期</span>
-            <strong>{spotReport ? formatDate(spotReport.date) : "—"}</strong>
-            <small>單位：億元</small>
-            <button type="button" onClick={() => void acquireSpotReport()} disabled={spotSaving}>
+          <div className="acquire-controls">
+            <label htmlFor="spot-date">指定日期</label>
+            <input
+              id="spot-date"
+              type="date"
+              min="2026-09-21"
+              max={taipeiToday}
+              value={spotDate}
+              onChange={(event) => setSpotDate(event.target.value)}
+              disabled={spotSaving}
+            />
+            <button type="button" onClick={() => void acquireSpotDate()} disabled={spotSaving}>
               {spotSaving ? "取得中…" : "取得證交所資料"}
             </button>
           </div>
         </div>
 
+        {spotNotice ? <p className="save-notice" role="status">{spotNotice}</p> : null}
+
         {spotError ? (
-          <div className="spot-state error-message" role="alert">
+          <div className="state-message error-message" role="alert">
+            <strong>證交所資料暫時無法載入</strong>
             <span>{spotError}</span>
-            <button type="button" onClick={retrySpotReport}>再試一次</button>
+            <button type="button" onClick={retrySpotReport}>
+              再試一次
+            </button>
           </div>
         ) : spotLoading && !spotReport ? (
-          <div className="spot-state" role="status">
+          <div className="state-message" role="status">
             <span className="loading-line" />
             <span>正在讀取資料庫的證交所資料…</span>
           </div>
-        ) : spotReport ? (
-          <div className="spot-grid">
-            {spotReport.data.map((flow) => <SpotFlowCard key={flow.name} flow={flow} />)}
+        ) : spotReport && spotReport.data.length > 0 ? (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">日期</th>
+                  <th scope="col">外資及陸資買賣超</th>
+                  <th scope="col">投信買賣超</th>
+                  <th scope="col">自營商買賣超</th>
+                  <th scope="col">三大法人合計買賣超</th>
+                </tr>
+              </thead>
+              <tbody>
+                {spotReport.data.map((day) => (
+                  <SpotDataRow key={day.date} day={day} />
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <div className="spot-state" role="status">
-            <span>資料庫目前沒有證交所資料，請按「取得證交所資料」抓取最新一天的買賣金額。</span>
+          <div className="state-message" role="status">
+            <strong>資料庫目前沒有證交所資料</strong>
+            <span>請選擇日期後按「取得證交所資料」。</span>
           </div>
         )}
+
+        <div className="method-notes">
+          <p>
+            <strong>單位：</strong>億元，四捨五入至小數第一位；買賣超 = 買進金額 − 賣出金額。
+          </p>
+          <p>
+            <strong>合併：</strong>自營商 = 自行買賣 + 避險；外資及陸資不含外資自營商。
+          </p>
+          <p>資料來源：證交所 BFI82U 三大法人買賣金額統計表。</p>
+        </div>
       </section>
 
       <section className="hero" id="morning">

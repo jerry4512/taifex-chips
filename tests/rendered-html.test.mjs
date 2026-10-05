@@ -91,6 +91,8 @@ test("offers a date-specific database acquisition flow", async () => {
   assert.match(page, /type="date"/);
   assert.match(page, /取得資料/);
   assert.match(page, /取得夜盤資料/);
+  assert.match(page, /id="spot-date"/);
+  assert.match(page, /取得證交所資料/);
   assert.doesNotMatch(page, /重新整理/);
   assert.match(route, /export async function POST/);
   assert.match(afterHoursRoute, /export async function GET/);

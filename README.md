@@ -65,7 +65,7 @@ Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegr
 | `item` | 證交所原始列名：`自營商(自行買賣)`、`自營商(避險)`、`投信`、`外資及陸資(不含外資自營商)`、`外資自營商`、`合計` |
 | `buy`／`sell` | 買進金額／賣出金額 |
 
-畫面與報告的四類法人在讀取時合併（`lib/twse.ts` 的 `combineBfi82u`）：自營商 = 自行買賣 + 避險，外資及陸資只取「不含外資自營商」那列，三大法人合計取「合計」列；**買賣差額 = 買進 − 賣出，不儲存**。BFI82U 只提供最新一個交易日，所以只能從開始存的那天起累積，無法回補更早的日子。
+畫面與報告的四類法人在讀取時合併（`lib/twse.ts` 的 `combineBfi82u`）：自營商 = 自行買賣 + 避險，外資及陸資只取「不含外資自營商」那列，三大法人合計取「合計」列；**買賣差額 = 買進 − 賣出，不儲存**。BFI82U 可帶 `type=day&dayDate=YYYYMMDD` 指定日期，網頁上選日期按「取得證交所資料」即可回補單日；排程仍抓最新一個交易日。
 
 另有 `collected_at`、`updated_at`。
 
@@ -81,7 +81,7 @@ npm run data -- clear all          # 三張全部清空
 ```
 
 - 清空前會列出連到哪個資料庫（只顯示主機，不印帳密）與要刪的日期範圍，**輸入 `yes` 才會刪**；加 `--yes` 可跳過確認，非互動環境沒加 `--yes` 會中止並回傳錯誤碼。
-- 多張表在同一個交易裡刪除，任一張失敗就全部不刪。只刪資料、保留資料表，所以網站**不會再灌回 09/21–09/24 的種子資料**；要恢復請在網頁上逐日按「取得資料」「取得夜盤資料」重抓（證交所只能取得最新一天）。
+- 多張表在同一個交易裡刪除，任一張失敗就全部不刪。只刪資料、保留資料表，所以網站**不會再灌回 09/21–09/24 的種子資料**；要恢復請在網頁上逐日按「取得資料」「取得夜盤資料」重抓與「取得證交所資料」。
 - 排程完成紀錄 `daily_schedule_jobs` 不受影響：當天已推播過的報告不會因清空而重發，但缺的日盤／夜盤仍會在下一輪補抓。
 - `.env` 的 `DATABASE_URL` 若指向 Railway，清掉的就是正式資料，執行前先看清楚第一行顯示的資料庫位置。
 
@@ -133,8 +133,8 @@ psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 | `POST` | `/api/trading-doctor/taifex-futures-after-hours` | `{"date":"YYYY-MM-DD"}`，抓期交所夜盤並存入資料庫 |
 | `GET` | `/api/trading-doctor/taifex-futures` | 讀出日盤明細與籌碼解讀 |
 | `POST` | `/api/trading-doctor/taifex-futures` | `{"date":"YYYY-MM-DD"}`，抓期交所全日與夜盤並存入資料庫 |
-| `GET` | `/api/trading-doctor/bfi82u` | 讀出資料庫裡最新一天的證交所三大法人買賣金額（尚未存過回 404） |
-| `POST` | `/api/trading-doctor/bfi82u` | 抓證交所最新一天並存入資料庫（不帶日期，BFI82U 不能指定日期） |
+| `GET` | `/api/trading-doctor/bfi82u` | 讀出資料庫裡所有日期的證交所三大法人買賣金額（`data` 為 `{ date, flows }` 陣列，日期由舊到新） |
+| `POST` | `/api/trading-doctor/bfi82u` | `{"date":"YYYY-MM-DD"}` 抓證交所指定日期並存入資料庫；不帶日期則抓最新一個交易日 |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
 | `POST` | `/api/trading-doctor/daily-schedule` | 排程用：補抓今天還沒拿到的夜盤／日盤／證交所，到齊後推播（見下方「平日自動排程」） |
