@@ -22,4 +22,6 @@ ENV WRANGLER_SEND_METRICS=false \
 
 EXPOSE 3000
 
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000", "--strictPort"]
+# 排程觸發器在同一個容器背景執行（每 5 分鐘打一次 localhost 的排程 API），
+# Railway 只部署這個映像，不必另開付費的排程服務。
+CMD ["sh", "-c", "node scripts/daily-schedule-trigger.mjs & exec npx vite preview --host 0.0.0.0 --port 3000 --strictPort"]

@@ -9,15 +9,5 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       DATABASE_URL: ${DATABASE_URL:-}
-    restart: unless-stopped
-
-  # 平日 14:50 起每 5 分鐘自動抓夜盤、日盤、證交所，到齊後推播 Telegram（見 lib/daily-schedule.ts）。
-  # 共用主服務的網路，才能用 localhost 呼叫（vite preview 會擋其他 Host）。
-  scheduler:
-    image: taifex-chips
-    pull_policy: never
-    command: ["node", "scripts/daily-schedule-trigger.mjs"]
-    network_mode: "service:taifex-chips"
-    depends_on:
-      - taifex-chips
+    # 平日 14:50 起每 5 分鐘自動抓資料與推播的觸發器，在同一個容器裡背景執行（見 Dockerfile 的 CMD）。
     restart: unless-stopped

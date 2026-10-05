@@ -1,4 +1,4 @@
-// 本機 Docker 用的排程觸發器：每 5 分鐘（對齊 :00、:05、:10…）呼叫一次排程 API。
+// 排程觸發器（Dockerfile 的 CMD 在同一個容器背景執行，本機 Docker 與 Railway 皆同）：每 5 分鐘（對齊 :00、:05、:10…）呼叫一次排程 API。
 // 平日、14:50 之後、還有沒拿到的資料才會真的去抓，這些判斷都在伺服器端的 lib/daily-schedule.ts。
 const url =
   process.env.SCHEDULE_URL ?? "http://localhost:3000/api/trading-doctor/daily-schedule";
