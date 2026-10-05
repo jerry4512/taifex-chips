@@ -265,7 +265,7 @@ docker compose down            # 停止（資料保留）
 
 ### 平日自動排程
 
-`compose.yaml` 的 `scheduler` 容器每 5 分鐘呼叫一次 `POST /api/trading-doctor/daily-schedule`，實際判斷在 `lib/daily-schedule.ts`：
+主服務容器裡背景執行的 `scripts/daily-schedule-trigger.mjs`（`Dockerfile` 的 `CMD` 與網站一起啟動，本機 Docker 與 Railway 都一樣，不需另開服務）每 5 分鐘呼叫一次 `POST /api/trading-doctor/daily-schedule`，實際判斷在 `lib/daily-schedule.ts`：
 
 - **時段**：週一到週五、台北時間 14:50 起；週末與 14:50 前直接略過，不連外。
 - **每輪只補缺的**：夜盤、日盤看資料庫有沒有當天那列；證交所則是先抓最新一天、存進 `twse_institutional_flows`（即使還是前一交易日也照存），再看資料庫有沒有今天的資料。
@@ -273,7 +273,7 @@ docker compose down            # 停止（資料保留）
 - **三項到齊**：推播一次籌碼報告（與「傳送籌碼報告」按鈕同一份）。至少一位收件人成功就算完成；全部失敗則下一輪重試。
 - **18:00 仍未到齊**（例如休市日）：推播一則「截至 18:00 仍未取得：…」通知，當天不再重試。
 - 報告、補抓、缺漏通知的完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
-- 看執行紀錄：每一步的明細（各項資料取得／尚未公布／失敗、補抓結果、推播成功與否、每位收件人的傳送結果）寫在主服務，用 `docker compose logs -f taifex-chips | grep 排程`；`docker compose logs -f scheduler` 則是每輪呼叫 API 的回應摘要。兩邊都不寫略過的輪次（週末、14:50 前、當天已完成）。
+- 看執行紀錄：每一步的明細（各項資料取得／尚未公布／失敗、補抓結果、推播成功與否、每位收件人的傳送結果）寫在主服務，與每輪呼叫 API 的回應摘要都在同一份紀錄：本機用 `docker compose logs -f taifex-chips | grep 排程`，Railway 看該服務的 Deploy Logs。都不寫略過的輪次（週末、14:50 前、當天已完成）。
 
 ## 驗證
 
