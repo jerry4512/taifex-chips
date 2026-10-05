@@ -12,8 +12,8 @@ async function trigger() {
   try {
     const response = await fetch(url, { method: "POST" });
     const body = await response.json().catch(() => null);
-    // 非排程時段回傳 skipped，不寫紀錄以免洗版。
-    if (!response.ok || body?.status !== "skipped") {
+    // 非排程時段（skipped）與當天已完成（done）都沒有連外，不寫紀錄以免每 5 分鐘洗版。
+    if (!response.ok || (body?.status !== "skipped" && body?.status !== "done")) {
       console.log(`[${timestamp()}] ${response.status} ${JSON.stringify(body)}`);
     }
   } catch (error) {
