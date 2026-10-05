@@ -118,3 +118,10 @@ test("groupBfi82uDays combines stored rows per day, oldest first", () => {
   assert.deepEqual(days[0].flows, parseBfi82u(payload).data);
   assert.deepEqual(groupBfi82uDays([]), []);
 });
+
+test("fetchBfi82u adds a timestamp so TWSE's CDN cannot serve a stale 'no data' answer", async () => {
+  const calls = [];
+  await fetchBfi82u("2026-09-24", jsonFetcher(payload, calls));
+  await fetchLatestBfi82u(jsonFetcher(payload, calls));
+  for (const url of calls) assert.match(url, /[?&]_=\d+/);
+});

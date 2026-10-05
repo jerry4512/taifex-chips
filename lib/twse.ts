@@ -152,7 +152,8 @@ export async function fetchBfi82u(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
   try {
-    const response = await fetcher(bfi82uUrl(date), {
+    // 證交所前面的 CDN 會快取同一個網址，資料公布前查過的「查無資料」會一直被回傳；加時間戳讓每次都拿到最新回應。
+    const response = await fetcher(`${bfi82uUrl(date)}&_=${Date.now()}`, {
       headers: {
         Accept: "application/json",
         "Accept-Language": "zh-TW,zh;q=0.9",
