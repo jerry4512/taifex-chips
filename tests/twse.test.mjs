@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { combineBfi82u, parseBfi82u, parseBfi82uRaw } from "../lib/twse.ts";
+import {
+  bfi82uUrl,
+  combineBfi82u,
+  fetchBfi82u,
+  fetchLatestBfi82u,
+  groupBfi82uDays,
+  parseBfi82u,
+  parseBfi82uRaw,
+} from "../lib/twse.ts";
 
 const payload = {
   stat: "OK",
@@ -56,4 +64,57 @@ test("parseBfi82uRaw rejects payloads missing a required row so nothing partial 
     () => parseBfi82uRaw({ ...payload, data: payload.data.filter((row) => row[0] !== "投信") }),
     /資料欄位不完整/,
   );
+});
+
+function jsonFetcher(body, calls = []) {
+  return async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+}
+
+test("bfi82uUrl asks TWSE for a specific day only when a date is given", () => {
+  assert.equal(bfi82uUrl(), "https://www.twse.com.tw/rwd/zh/fund/BFI82U?response=json");
+  assert.equal(
+    bfi82uUrl("2026-09-24"),
+    "https://www.twse.com.tw/rwd/zh/fund/BFI82U?response=json&type=day&dayDate=20260924",
+  );
+  assert.throws(() => bfi82uUrl("2026/09/24"), /請選擇有效日期/);
+});
+
+test("fetchBfi82u fetches the requested day", async () => {
+  const calls = [];
+  const raw = await fetchBfi82u("2026-09-24", jsonFetcher(payload, calls));
+  assert.equal(raw.date, "2026-09-24");
+  assert.equal(raw.rows.length, 6);
+  assert.match(calls[0], /dayDate=20260924/);
+});
+
+test("fetchBfi82u rejects non-trading days instead of saving another day", async () => {
+  await assert.rejects(
+    fetchBfi82u("2026-09-26", jsonFetcher({ stat: "很抱歉，沒有符合條件的資料!" })),
+    /該日期沒有證交所資料/,
+  );
+  // 證交所若回了別天的資料，也不能存成指定的日期。
+  await assert.rejects(fetchBfi82u("2026-09-25", jsonFetcher(payload)), /該日期沒有證交所資料/);
+});
+
+test("fetchLatestBfi82u still asks for the latest day without a date", async () => {
+  const calls = [];
+  const raw = await fetchLatestBfi82u(jsonFetcher(payload, calls));
+  assert.equal(raw.date, "2026-09-24");
+  assert.doesNotMatch(calls[0], /dayDate/);
+});
+
+test("groupBfi82uDays combines stored rows per day, oldest first", () => {
+  const day1 = parseBfi82uRaw(payload);
+  const day2 = parseBfi82uRaw({ ...payload, date: "20260925" });
+  const stored = [
+    ...day2.rows.map((row) => ({ date: day2.date, ...row })),
+    ...[...day1.rows].reverse().map((row) => ({ date: day1.date, ...row })),
+  ];
+  const days = groupBfi82uDays(stored);
+  assert.deepEqual(days.map((day) => day.date), ["2026-09-24", "2026-09-25"]);
+  assert.deepEqual(days[0].flows, parseBfi82u(payload).data);
+  assert.deepEqual(groupBfi82uDays([]), []);
 });

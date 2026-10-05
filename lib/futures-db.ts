@@ -11,8 +11,8 @@ import type {
   TaifexAfterHoursRow,
   TaifexFuturesRow,
 } from "./taifex";
-import type { TwseBfi82uRaw, TwseBfi82uResponse } from "./twse";
-import { combineBfi82u } from "./twse";
+import type { TwseBfi82uDay, TwseBfi82uRaw, TwseBfi82uResponse } from "./twse";
+import { combineBfi82u, groupBfi82uDays } from "./twse";
 import {
   equivalentTxContracts,
   estimateOpenEquivalentNetOi,
@@ -397,6 +397,19 @@ export async function latestTwseInstitutionalFlows(): Promise<TwseBfi82uResponse
     }),
     generatedAt: new Date().toISOString(),
   };
+}
+
+/** 讀資料庫裡所有日期並各自合併成四類法人，日期由舊到新。 */
+export async function listTwseInstitutionalFlows(): Promise<TwseBfi82uDay[]> {
+  // BIGINT 由 postgres.js 以字串回傳；金額遠小於 2^53，轉回 number 不失真。
+  const stored = await withDatabase(
+    (sql) => sql<{ date: string; item: string; buy: string; sell: string }[]>`
+      SELECT date, item, buy, sell FROM twse_institutional_flows ORDER BY date
+    `,
+  );
+  return groupBfi82uDays(
+    stored.map((row) => ({ date: row.date, item: row.item, buy: Number(row.buy), sell: Number(row.sell) })),
+  );
 }
 
 /** 夜盤、日盤、證交所看原始資料表有沒有當天的資料；其餘看排程完成紀錄。 */
