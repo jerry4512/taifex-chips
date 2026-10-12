@@ -10,7 +10,7 @@
 
 ## 資料庫
 
-Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegram 收件人同一個資料庫，見下方「登入」）。期交所籌碼兩張表、證交所現貨一張表，另有一張排程完成紀錄 `daily_schedule_jobs`；schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
+Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegram 收件人同一個資料庫，見下方「登入」）。期交所籌碼兩張表、證交所現貨一張表；schema 定義在 `db/schema.ts`，建表 SQL 在 `drizzle/`。
 
 `lib/futures-db.ts` 查詢時遇到「資料表不存在」（`42P01`）才 `CREATE TABLE IF NOT EXISTS`、以 `ON CONFLICT DO NOTHING` 灌入 2026/09/21–09/24 的種子資料並重試，所以空資料庫也能直接跑，平常查詢也不會多跑建表指令。Worker 不能跨請求共用連線，每次讀寫都開一條、用完即關。
 
@@ -65,7 +65,7 @@ Postgres，連線字串為環境變數 `DATABASE_URL`（與登入帳號、Telegr
 | `item` | 證交所原始列名：`自營商(自行買賣)`、`自營商(避險)`、`投信`、`外資及陸資(不含外資自營商)`、`外資自營商`、`合計` |
 | `buy`／`sell` | 買進金額／賣出金額 |
 
-畫面與報告的四類法人在讀取時合併（`lib/twse.ts` 的 `combineBfi82u`）：自營商 = 自行買賣 + 避險，外資及陸資只取「不含外資自營商」那列，三大法人合計取「合計」列；**買賣差額 = 買進 − 賣出，不儲存**。BFI82U 可帶 `type=day&dayDate=YYYYMMDD` 指定日期，網頁上選日期按「取得證交所資料」即可回補單日；排程仍抓最新一個交易日。
+畫面與報告的四類法人在讀取時合併（`lib/twse.ts` 的 `combineBfi82u`）：自營商 = 自行買賣 + 避險，外資及陸資只取「不含外資自營商」那列，三大法人合計取「合計」列；**買賣差額 = 買進 − 賣出，不儲存**。BFI82U 可帶 `type=day&dayDate=YYYYMMDD` 指定日期，網頁上選日期按「取得證交所資料」即可回補單日。
 
 另有 `collected_at`、`updated_at`。
 
@@ -82,7 +82,6 @@ npm run data -- clear all          # 三張全部清空
 
 - 清空前會列出連到哪個資料庫（只顯示主機，不印帳密）與要刪的日期範圍，**輸入 `yes` 才會刪**；加 `--yes` 可跳過確認，非互動環境沒加 `--yes` 會中止並回傳錯誤碼。
 - 多張表在同一個交易裡刪除，任一張失敗就全部不刪。只刪資料、保留資料表，所以網站**不會再灌回 09/21–09/24 的種子資料**；要恢復請在網頁上逐日按「取得資料」「取得夜盤資料」重抓與「取得證交所資料」。
-- 排程完成紀錄 `daily_schedule_jobs` 不受影響：當天已推播過的報告不會因清空而重發，但缺的日盤／夜盤仍會在下一輪補抓。
 - `.env` 的 `DATABASE_URL` 若指向 Railway，清掉的就是正式資料，執行前先看清楚第一行顯示的資料庫位置。
 
 直接下 SQL：
@@ -137,7 +136,6 @@ psql "$DATABASE_URL" -c "SELECT * FROM nightly_futures_positions ORDER BY date;"
 | `POST` | `/api/trading-doctor/bfi82u` | `{"date":"YYYY-MM-DD"}` 抓證交所指定日期並存入資料庫；不帶日期則抓最新一個交易日 |
 | `GET` | `/api/trading-doctor/telegram-test` | 回報 Telegram 設定狀態（不含 token） |
 | `POST` | `/api/trading-doctor/telegram-test` | 組出籌碼報告並推播給所有收件人 |
-| `POST` | `/api/trading-doctor/daily-schedule` | 排程用：補抓今天還沒拿到的夜盤／日盤／證交所，到齊後推播（見下方「平日自動排程」） |
 
 網頁需要先登入，未登入時會導向 `/login`；`/api/*` 不需登入，任何知道網址的人都能直接呼叫（包含會連外抓資料、寫資料庫與發 Telegram 推播的 `POST`）。
 
@@ -262,18 +260,6 @@ docker compose down            # 停止（資料保留）
 - **Telegram 與登入設定**：沿用同一份 `.env`，`compose.yaml` 的 `environment` 只從 `.env` 取 `TELEGRAM_BOT_TOKEN`、`DATABASE_URL` 兩個值帶進容器（`.env` 不會被打包進映像；新增其他環境變數時要一併加進 `environment`）。改完 `.env` 要 `docker compose up -d` 重建容器才會生效，單純 `restart` 不會重讀。沒有 `.env` 也能啟動，但沒有 `DATABASE_URL` 就無法登入、讀寫籌碼資料，也無法推播。
 - **資料庫**：籌碼資料存在 `DATABASE_URL` 指向的 Postgres，容器本身不存資料，`down` 或重建都不影響；和 `npm run dev` 用的 `.env` 指向同一個資料庫時，兩邊看到的是同一份。
 - **改程式後**：要加 `--build` 重建映像。
-
-### 平日自動排程
-
-主服務容器裡背景執行的 `scripts/daily-schedule-trigger.mjs`（`Dockerfile` 的 `CMD` 與網站一起啟動，本機 Docker 與 Railway 都一樣，不需另開服務）每 5 分鐘呼叫一次 `POST /api/trading-doctor/daily-schedule`，實際判斷在 `lib/daily-schedule.ts`：
-
-- **時段**：週一到週五、台北時間 14:50 起；週末與 14:50 前直接略過，不連外。
-- **每輪只補缺的**：夜盤、日盤看資料庫有沒有當天那列；證交所則是先抓最新一天、存進 `twse_institutional_flows`（即使還是前一交易日也照存），再看資料庫有沒有今天的資料。
-- **補抓前幾天**：每天第一輪（通常是 14:50）先補最近 7 天內資料庫缺的平日夜盤／日盤，一天只補一次（休市日本來就抓不到，不重複白打）。只補資料、不補發當天的報告。缺一天會讓隔天的純日盤變化量、籌碼型態與開盤推估改用更早一天當基準而算錯，所以要先補齊再抓今天。
-- **三項到齊**：推播一次籌碼報告（與「傳送籌碼報告」按鈕同一份）。至少一位收件人成功就算完成；全部失敗則下一輪重試。
-- **18:00 仍未到齊**（例如休市日）：推播一則「截至 18:00 仍未取得：…」通知，當天不再重試。
-- 報告、補抓、缺漏通知的完成紀錄存在 `daily_schedule_jobs` 表，重複觸發不會重複寫入或重複推播。
-- 看執行紀錄：每一步的明細（各項資料取得／尚未公布／失敗、補抓結果、推播成功與否、每位收件人的傳送結果）寫在主服務，與每輪呼叫 API 的回應摘要都在同一份紀錄：本機用 `docker compose logs -f taifex-chips | grep 排程`，Railway 看該服務的 Deploy Logs。都不寫略過的輪次（週末、14:50 前、當天已完成）。
 
 ## 驗證
 
