@@ -9,5 +9,4 @@ services:
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       DATABASE_URL: ${DATABASE_URL:-}
-    # 平日 14:50 起每 5 分鐘自動抓資料與推播的觸發器，在同一個容器裡背景執行（見 Dockerfile 的 CMD）。
     restart: unless-stopped

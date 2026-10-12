@@ -5,7 +5,6 @@
  */
 import type postgres from "postgres";
 import { withSql } from "./auth-db";
-import type { DailyJob } from "./daily-schedule";
 import type {
   ForeignNetPositions,
   TaifexAfterHoursRow,
@@ -126,12 +125,6 @@ export const FUTURES_TABLES_SQL = [
     collected_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (date, item)
-  )`,
-  `CREATE TABLE IF NOT EXISTS daily_schedule_jobs (
-    date TEXT NOT NULL,
-    job TEXT NOT NULL,
-    completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (date, job)
   )`,
 ];
 
@@ -409,28 +402,5 @@ export async function listTwseInstitutionalFlows(): Promise<TwseBfi82uDay[]> {
   );
   return groupBfi82uDays(
     stored.map((row) => ({ date: row.date, item: row.item, buy: Number(row.buy), sell: Number(row.sell) })),
-  );
-}
-
-/** 夜盤、日盤、證交所看原始資料表有沒有當天的資料；其餘看排程完成紀錄。 */
-export async function isDailyJobDone(date: string, job: DailyJob): Promise<boolean> {
-  const rows = await withDatabase((sql) =>
-    job === "night"
-      ? sql`SELECT 1 FROM nightly_futures_positions WHERE date = ${date}`
-      : job === "day"
-        ? sql`SELECT 1 FROM daily_futures_positions WHERE date = ${date}`
-        : job === "spot"
-          ? sql`SELECT 1 FROM twse_institutional_flows WHERE date = ${date} LIMIT 1`
-          : sql`SELECT 1 FROM daily_schedule_jobs WHERE date = ${date} AND job = ${job}`,
-  );
-  return rows.length > 0;
-}
-
-export async function markDailyJobDone(date: string, job: DailyJob): Promise<void> {
-  await withDatabase(
-    (sql) => sql`
-      INSERT INTO daily_schedule_jobs (date, job) VALUES (${date}, ${job})
-      ON CONFLICT (date, job) DO NOTHING
-    `,
   );
 }

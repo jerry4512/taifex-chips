@@ -32,14 +32,3 @@ export const twseInstitutionalFlows = pgTable(
   },
   (table) => [primaryKey({ columns: [table.date, table.item] })],
 );
-
-/** 平日下午排程的完成紀錄（證交所已取得、今日已推播），只記完成時間，不存任何數值。 */
-export const dailyScheduleJobs = pgTable(
-  "daily_schedule_jobs",
-  {
-    date: text("date").notNull(),
-    job: text("job").notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.date, table.job] })],
-);

@@ -1,0 +1,1 @@
+DROP TABLE "daily_schedule_jobs" CASCADE;
